@@ -1,0 +1,59 @@
+{
+  "name": "projects",
+  "relations": [
+    {
+      "name": "owner"
+    },
+    {
+      "name": "parent"
+    },
+    {
+      "name": "editor",
+      "rewrite": {
+        "union": {
+          "children": [
+            { "_this": {} },
+            {
+              "computed_subjectset": {
+                "relation": "owner"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "viewer",
+      "rewrite": {
+        "union": {
+          "children": [
+            { "_this": {} },
+            {
+              "rewrite": {
+                "intersection":  {
+                  "children": [
+                    {
+                      "computed_subjectset": {
+                        "relation": "editor"
+                      }
+                    },
+                    {
+                      "tuple_to_subjectset": {
+                        "tupleset": {
+                          "relation": "parent"
+                        },
+                        "computed_subjectset": {
+                          "relation": "viewer"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

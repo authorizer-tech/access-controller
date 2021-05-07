@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "access-controller.fullname" . }}-discovery
+  labels:
+    {{- include "access-controller.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  # We want all Pods in the StatefulSet to have their addresses published
+  # for the sake of the other Pods even before they're ready, since they
+  # have to be able to gossip with each other in order to become ready.
+  publishNotReadyAddresses: true
+  ports:
+    - port: {{ .Values.service.ports.gossip.port }}
+      targetPort: gossip-tcp
+      protocol: TCP
+      name: gossip
+  selector:
+    {{- include "access-controller.selectorLabels" . | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "access-controller.fullname" . }}
+  labels:
+    {{- include "access-controller.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.service.ports.grpc.port }}
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+    {{- if .Values.grpcGateway.enabled }}
+    - port: {{ .Values.service.ports.grpcGateway.port }}
+      targetPort: grpc-gateway
+      protocol: TCP
+      name: grpc-gateway
+    {{- end }}
+  selector:
+    {{- include "access-controller.selectorLabels" . | nindent 4 }}

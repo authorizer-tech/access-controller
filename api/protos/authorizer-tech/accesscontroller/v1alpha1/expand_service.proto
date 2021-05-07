@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package authorizer.accesscontroller.v1alpha1;
+
+import "authorizer-tech/accesscontroller/v1alpha1/acl.proto";
+
+option go_package = "github.com/authorizer-tech/access-controller/api/protos/authorizer-tech/accesscontroller/v1alpha1;acl";
+
+// The service to serve Expand RPC requests.
+service ExpandService {
+
+  // Expand will expand all the subjects given in the subject set.
+  // Expand follows direct and indirect subject sets in a depth-first
+  // fashion.
+  rpc Expand(ExpandRequest) returns (ExpandResponse);
+}
+
+// The request for an ExpandService.Expand rpc.
+message ExpandRequest {
+
+  SubjectSet subject_set = 1;
+}
+
+// The response for an ExpandService.Expand rpc.
+message ExpandResponse {
+
+  // The tree the requested subject set expands to.
+  // The requested subject set is the subject of the root.
+  //
+  // This field can be nil in some circumstances.
+  SubjectTree tree = 1;
+}
+
+enum NodeType {
+
+  NODE_TYPE_UNSPECIFIED = 0;
+
+  // This node expands to a union of all children.
+  NODE_TYPE_UNION = 1;
+
+  // This node expands to an intersection of the children.
+  NODE_TYPE_INTERSECTION = 3;
+
+  // This node is a leaf and contains no children.
+  // Its subject is a `SubjectID` unless `max_depth` was reached.
+  NODE_TYPE_LEAF = 4;
+}
+
+message SubjectTree {
+
+  // The type of the node.
+  NodeType node_type = 1;
+
+  // The subject this node represents.
+  Subject subject = 2;
+
+  // The children of this node.
+  //
+  // This is unset if `node_type` is `NODE_TYPE_LEAF`.
+  repeated SubjectTree children = 3;
+}

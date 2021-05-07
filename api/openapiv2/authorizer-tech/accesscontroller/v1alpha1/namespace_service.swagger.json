@@ -1,0 +1,247 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "authorizer-tech/accesscontroller/v1alpha1/namespace_service.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "NamespaceConfigService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/authorizer/access-controller/v1alpha1/namespace-configs": {
+      "get": {
+        "summary": "Read a namespace configuration.",
+        "operationId": "NamespaceConfigService_ReadConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1alpha1ReadConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "snaptoken",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "NamespaceConfigService"
+        ]
+      },
+      "post": {
+        "summary": "Write a new namespace configuration, overwriting any prior one.",
+        "operationId": "NamespaceConfigService_WriteConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1alpha1WriteConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1alpha1WriteConfigRequest"
+            }
+          }
+        ],
+        "tags": [
+          "NamespaceConfigService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "ChildThis": {
+      "type": "object"
+    },
+    "SetOperationChild": {
+      "type": "object",
+      "properties": {
+        "This": {
+          "$ref": "#/definitions/ChildThis"
+        },
+        "computedSubjectset": {
+          "$ref": "#/definitions/v1alpha1ComputedSubjectset"
+        },
+        "tupleToSubjectset": {
+          "$ref": "#/definitions/v1alpha1TupleToSubjectset"
+        },
+        "rewrite": {
+          "$ref": "#/definitions/v1alpha1Rewrite"
+        }
+      }
+    },
+    "TupleToSubjectsetTupleset": {
+      "type": "object",
+      "properties": {
+        "relation": {
+          "type": "string"
+        }
+      }
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "typeUrl": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string",
+          "format": "byte"
+        }
+      }
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1alpha1ComputedSubjectset": {
+      "type": "object",
+      "properties": {
+        "relation": {
+          "type": "string"
+        }
+      }
+    },
+    "v1alpha1NamespaceConfig": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "relations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/v1alpha1Relation"
+          }
+        }
+      }
+    },
+    "v1alpha1ReadConfigResponse": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/definitions/v1alpha1NamespaceConfig"
+        },
+        "snaptoken": {
+          "type": "string"
+        }
+      },
+      "description": "The response for a NamespaceConfigService.ReadConfig rpc."
+    },
+    "v1alpha1Relation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "rewrite": {
+          "$ref": "#/definitions/v1alpha1Rewrite"
+        }
+      }
+    },
+    "v1alpha1Rewrite": {
+      "type": "object",
+      "properties": {
+        "union": {
+          "$ref": "#/definitions/v1alpha1SetOperation"
+        },
+        "intersection": {
+          "$ref": "#/definitions/v1alpha1SetOperation"
+        }
+      }
+    },
+    "v1alpha1SetOperation": {
+      "type": "object",
+      "properties": {
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SetOperationChild"
+          }
+        }
+      }
+    },
+    "v1alpha1TupleToSubjectset": {
+      "type": "object",
+      "properties": {
+        "tupleset": {
+          "$ref": "#/definitions/TupleToSubjectsetTupleset"
+        },
+        "computedSubjectset": {
+          "$ref": "#/definitions/v1alpha1ComputedSubjectset"
+        }
+      }
+    },
+    "v1alpha1WriteConfigRequest": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "$ref": "#/definitions/v1alpha1NamespaceConfig"
+        }
+      },
+      "description": "The request for a NamespaceConfigService.WriteConfig rpc."
+    },
+    "v1alpha1WriteConfigResponse": {
+      "type": "object",
+      "properties": {
+        "snaptoken": {
+          "type": "string"
+        }
+      },
+      "description": "The response for a NamespaceConfigService.WriteConfig rpc."
+    }
+  }
+}

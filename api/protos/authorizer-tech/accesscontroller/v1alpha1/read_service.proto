@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package authorizer.accesscontroller.v1alpha1;
+
+import "authorizer-tech/accesscontroller/v1alpha1/acl.proto";
+import "google/protobuf/field_mask.proto";
+import "google/api/annotations.proto";
+
+option go_package = "github.com/authorizer-tech/access-controller/api/protos/authorizer-tech/accesscontroller/v1alpha1;acl";
+
+// The RPC service to query Access Control Lists.
+service ReadService {
+
+    // Lists ACL relation tuples.
+    rpc ListRelationTuples(ListRelationTuplesRequest) returns (ListRelationTuplesResponse) {
+        option (google.api.http) = {
+            get: "/authorizer/access-controller/v1alpha1/tuples"
+        };
+    }
+}
+
+message ListRelationTuplesRequest {
+
+    // The query for listing relation tuples. Clients can
+    // specify any optional field to partially filter for
+    // specific relation tuples.
+    //
+    // Example use cases:
+    //  - object only: display a list of all ACLs of one object
+    //  - relation only: get all groups that have members; e.g. get all directories that have content
+    //  - object & relation: display all subjects that have e.g. write relation
+    //  - subject & relation: display all groups a subject belongs to/display all objects a subject has access to
+    //  - object & relation & subject: check whether the relation tuple already exists, before writing it
+    message Query {
+        // Required. The namespace to query.
+        string namespace = 1;
+        // Optional.
+        string object = 2;
+        // Optional.
+        repeated string relations = 3;
+        // Optional.
+        Subject subject = 4;
+    }
+
+    // All field constraints are concatenated with a logical
+    // AND operator.
+    Query query = 1;
+
+    // Optional. The list of fields to expand in the RelationTuple
+    // list returned in `ListRelationTuplesResponse`. Leaving this
+    // field unspecified means all fields are expanded.
+    //
+    // Available fields:
+    // `object`, `relation`, `subject`,
+    // `namespace`, `subject.id`, `subject.namespace`,
+    // `subject.object`, `subject.relation`
+    google.protobuf.FieldMask expand_mask = 2;
+
+    // Optional. The snapshot token for this read.
+    string snaptoken = 3;
+
+    // Optional. The maximum number of RelationTuples to return in
+    // the response.
+    int32 page_size = 4;
+
+    // Optional. A pagination token returned from a previous call to
+    // `ListRelationTuples` that indicates where the page should start
+    // at.
+    string page_token = 5;
+}
+
+message ListRelationTuplesResponse {
+
+    // The relation tuples matching the request query.
+    //
+    // The RelationTuple list is ordered from the newest
+    // RelationTuple to the oldest.
+    repeated RelationTuple relation_tuples = 1;
+
+    // The token required to paginate to the next page.
+    string next_page_token = 2;
+
+    // Indicates if this is the last page of paginated data.
+    // If `is_last_page` is true then using `next_page_token`
+    // in subsequent requests will return an error.
+    bool is_last_page = 3;
+}

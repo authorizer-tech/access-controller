@@ -1,0 +1,168 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "authorizer-tech/accesscontroller/v1alpha1/check_service.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "CheckService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/authorizer/access-controller/v1alpha1/check": {
+      "get": {
+        "summary": "Check performs an authorization check.",
+        "operationId": "CheckService_Check",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1alpha1CheckResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "namespace",
+            "description": "The namespace to evaluate the check.\n\nNote: If you use the Expand API and the check\nevaluates a RelationTuple specifying a SubjectSet as\nsubject or due to a rewrite rule in a namespace config\nthis check request may involve other namespaces automatically.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "object",
+            "description": "The related object in this check.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "relation",
+            "description": "The relation between the Object and the Subject.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "subject.id",
+            "description": "A concrete id of the subject.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "subject.set.namespace",
+            "description": "The namespace of the object and relation\nreferenced in this subject set.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "subject.set.object",
+            "description": "The object selected by the subjects.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "subject.set.relation",
+            "description": "The relation to the object by the subjects.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "CheckService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "typeUrl": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string",
+          "format": "byte"
+        }
+      }
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1alpha1CheckResponse": {
+      "type": "object",
+      "properties": {
+        "allowed": {
+          "type": "boolean",
+          "description": "Whether the specified subject is\nrelated to the requested object.\n\nIt is false by default if no ACL matches."
+        }
+      },
+      "description": "The response for a CheckService.Check rpc."
+    },
+    "v1alpha1Subject": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "A concrete id of the subject."
+        },
+        "set": {
+          "$ref": "#/definitions/v1alpha1SubjectSet",
+          "description": "A subject set that expands to more Subjects\n(used for inheritance)."
+        }
+      },
+      "description": "Subject is either a concrete subject id or\na subject set expanding to more Subjects."
+    },
+    "v1alpha1SubjectSet": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "The namespace of the object and relation\nreferenced in this subject set."
+        },
+        "object": {
+          "type": "string",
+          "description": "The object selected by the subjects."
+        },
+        "relation": {
+          "type": "string",
+          "description": "The relation to the object by the subjects."
+        }
+      },
+      "description": "SubjectSet refers to all subjects which have\nthe same `relation` to an `object`.\nIt is also used for inheritance."
+    }
+  }
+}

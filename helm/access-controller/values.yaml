@@ -1,0 +1,113 @@
+image:
+  repository: gcr.io/jon-whit/authorizer/access-controller
+  pullPolicy: Always
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Cluster's default DNS domain.
+# You should overwrite it if you're using a different one,
+# otherwise node discovery won't work.
+clusterDomain: cluster.local
+
+conf:
+  # The addresses for connecting nodes to an existing cluster. If you are
+  # deploying a second Access Controller cluster that should join a first
+  # one, use the below list to join to the existing cluster.
+  # Each item in the array should be a FQDN (and port if needed) resolvable by
+  # new Pods.
+  join: []
+
+statefulset:
+  replicas: 3
+  updateStrategy:
+    type: RollingUpdate
+  podManagementPolicy: Parallel
+  budget:
+    maxUnavailable: 1
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+tls:
+  enabled: false
+
+service:
+  ports:
+    grpc:
+      port: 50052
+    gossip:
+      port: 7946
+    grpcGateway:
+      port: 8082
+
+ingress:
+  enabled: false
+  annotations: {}
+  hosts:
+    - host: chart-example.local
+      paths: []
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+grpcGateway:
+  enabled: false
+
+postgres:
+  host: localhost
+  port: 5432
+  database: postgres
+  username: postgres
+  credentials:
+    secret: postgres-creds
+    usernameKey: username
+    passwordKey: password

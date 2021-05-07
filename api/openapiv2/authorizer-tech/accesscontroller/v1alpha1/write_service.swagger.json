@@ -1,0 +1,189 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "authorizer-tech/accesscontroller/v1alpha1/write_service.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "WriteService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/authorizer/access-controller/v1alpha1/write": {
+      "post": {
+        "summary": "Writes one or more relation tuples in a single transaction.",
+        "operationId": "WriteService_WriteRelationTuplesTxn",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1alpha1WriteRelationTuplesTxnResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1alpha1WriteRelationTuplesTxnRequest"
+            }
+          }
+        ],
+        "tags": [
+          "WriteService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "RelationTupleDeltaAction": {
+      "type": "string",
+      "enum": [
+        "ACTION_UNSPECIFIED",
+        "INSERT",
+        "DELETE"
+      ],
+      "default": "ACTION_UNSPECIFIED",
+      "description": " - ACTION_UNSPECIFIED: Unspecified.\nThe `WriteRelationTuplesTxn` rpc ignores this\nRelationTupleDelta if an action was unspecified.\n - INSERT: Insertion of a new RelationTuple.\nIt is ignored if already existing.\n - DELETE: Deletion of the RelationTuple.\nIt is ignored if it does not exist."
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "typeUrl": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string",
+          "format": "byte"
+        }
+      }
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1alpha1RelationTuple": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "The namespace this relation tuple lives in."
+        },
+        "object": {
+          "type": "string",
+          "description": "The object related by this tuple.\nObjects live within the namespace of the tuple."
+        },
+        "relation": {
+          "type": "string",
+          "description": "The relation between an Object and a Subject."
+        },
+        "subject": {
+          "$ref": "#/definitions/v1alpha1Subject",
+          "description": "The subject related by this tuple.\nA Subject either represents a concrete subject id or\na SubjectSet that expands to more Subjects."
+        }
+      },
+      "description": "RelationTuple relates an Object with a Subject.\n\nWhile a tuple reflects a relationship between Object\nand Subject, they do not completely define the effective ACLs."
+    },
+    "v1alpha1RelationTupleDelta": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/RelationTupleDeltaAction",
+          "description": "The action to do on the RelationTuple."
+        },
+        "relationTuple": {
+          "$ref": "#/definitions/v1alpha1RelationTuple",
+          "description": "The target RelationTuple."
+        }
+      },
+      "description": "Write-delta for a WriteRelationTuplesTxnRequest."
+    },
+    "v1alpha1Subject": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "A concrete id of the subject."
+        },
+        "set": {
+          "$ref": "#/definitions/v1alpha1SubjectSet",
+          "description": "A subject set that expands to more Subjects\n(used for inheritance)."
+        }
+      },
+      "description": "Subject is either a concrete subject id or\na subject set expanding to more Subjects."
+    },
+    "v1alpha1SubjectSet": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "The namespace of the object and relation\nreferenced in this subject set."
+        },
+        "object": {
+          "type": "string",
+          "description": "The object selected by the subjects."
+        },
+        "relation": {
+          "type": "string",
+          "description": "The relation to the object by the subjects."
+        }
+      },
+      "description": "SubjectSet refers to all subjects which have\nthe same `relation` to an `object`.\nIt is also used for inheritance."
+    },
+    "v1alpha1WriteRelationTuplesTxnRequest": {
+      "type": "object",
+      "properties": {
+        "relationTupleDeltas": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/v1alpha1RelationTupleDelta"
+          },
+          "description": "The write delta for the relation tuples operated in one single transaction.\nEither all actions commit or no changes take effect on error.\n\nThe tuple's etag is used for a consistent read-modify-write request flow.\nIf the etag is not present, the tuple is not validated against the state\nof the serverside tuple."
+        }
+      },
+      "description": "The request of a WriteService.WriteRelationTuplesTxn rpc."
+    },
+    "v1alpha1WriteRelationTuplesTxnResponse": {
+      "type": "object",
+      "properties": {
+        "snaptokens": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The list of the new latest snapshot tokens of the affected RelationTuple,\nwith the same index as specified in the `relation_tuple_deltas` field of\nthe WriteRelationTuplesTxnRequest request.\n\nIf the RelationTupleDelta_Action was DELETE\nthe snaptoken is empty at the same index."
+        }
+      },
+      "description": "The response of a WriteService.WriteRelationTuplesTxn rpc."
+    }
+  }
+}

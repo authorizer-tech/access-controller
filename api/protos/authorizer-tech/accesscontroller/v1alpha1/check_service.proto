@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package authorizer.accesscontroller.v1alpha1;
+
+import "authorizer-tech/accesscontroller/v1alpha1/acl.proto";
+import "google/api/annotations.proto";
+
+option go_package = "github.com/authorizer-tech/access-controller/api/protos/authorizer-tech/accesscontroller/v1alpha1;acl";
+
+// The service that performs authorization checks
+// based on the stored Access Control Lists.
+service CheckService {
+
+  // Check performs an authorization check.
+  rpc Check(CheckRequest) returns (CheckResponse) {
+    option (google.api.http) = {
+      get: "/authorizer/access-controller/v1alpha1/check"
+    };
+  }
+}
+
+// The request for a CheckService.Check rpc.
+// Checks whether a specific subject is related to an object.
+message CheckRequest {
+
+  // The namespace to evaluate the check.
+  //
+  // Note: If you use the Expand API and the check
+  // evaluates a RelationTuple specifying a SubjectSet as
+  // subject or due to a rewrite rule in a namespace config
+  // this check request may involve other namespaces automatically.
+  string namespace = 1;
+
+  // The related object in this check.
+  string object = 2;
+
+  // The relation between the Object and the Subject.
+  string relation = 3;
+
+  // The related subject to check against.
+  Subject subject = 4;
+}
+
+// The response for a CheckService.Check rpc.
+message CheckResponse {
+
+  // Whether the specified subject is
+  // related to the requested object.
+  //
+  // It is false by default if no ACL matches.
+  bool allowed = 1;
+}

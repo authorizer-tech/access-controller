@@ -1,0 +1,15 @@
+{
+  "name": "groups",
+  "relations": [
+    {
+      "name": "member",
+      "rewrite": {
+        "union": {
+          "children": [
+            { "_this": {} }
+          ]
+        }
+      }
+    }
+  ]
+}

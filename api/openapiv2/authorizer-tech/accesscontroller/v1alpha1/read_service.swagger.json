@@ -1,0 +1,258 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "authorizer-tech/accesscontroller/v1alpha1/read_service.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "ReadService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/authorizer/access-controller/v1alpha1/tuples": {
+      "get": {
+        "summary": "Lists ACL relation tuples.",
+        "operationId": "ReadService_ListRelationTuples",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1alpha1ListRelationTuplesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "query.namespace",
+            "description": "Required. The namespace to query.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "query.object",
+            "description": "Optional.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "query.relations",
+            "description": "Optional.",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.subject.id",
+            "description": "A concrete id of the subject.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "query.subject.set.namespace",
+            "description": "The namespace of the object and relation\nreferenced in this subject set.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "query.subject.set.object",
+            "description": "The object selected by the subjects.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "query.subject.set.relation",
+            "description": "The relation to the object by the subjects.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "expandMask",
+            "description": "Optional. The list of fields to expand in the RelationTuple\nlist returned in `ListRelationTuplesResponse`. Leaving this\nfield unspecified means all fields are expanded.\n\nAvailable fields:\n`object`, `relation`, `subject`,\n`namespace`, `subject.id`, `subject.namespace`,\n`subject.object`, `subject.relation`",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "snaptoken",
+            "description": "Optional. The snapshot token for this read.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "pageSize",
+            "description": "Optional. The maximum number of RelationTuples to return in\nthe response.",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "pageToken",
+            "description": "Optional. A pagination token returned from a previous call to\n`ListRelationTuples` that indicates where the page should start\nat.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ReadService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "ListRelationTuplesRequestQuery": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "Required. The namespace to query."
+        },
+        "object": {
+          "type": "string",
+          "description": "Optional."
+        },
+        "relations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional."
+        },
+        "subject": {
+          "$ref": "#/definitions/v1alpha1Subject",
+          "description": "Optional."
+        }
+      },
+      "description": "The query for listing relation tuples. Clients can\nspecify any optional field to partially filter for\nspecific relation tuples.\n\nExample use cases:\n - object only: display a list of all ACLs of one object\n - relation only: get all groups that have members; e.g. get all directories that have content\n - object \u0026 relation: display all subjects that have e.g. write relation\n - subject \u0026 relation: display all groups a subject belongs to/display all objects a subject has access to\n - object \u0026 relation \u0026 subject: check whether the relation tuple already exists, before writing it"
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "typeUrl": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string",
+          "format": "byte"
+        }
+      }
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1alpha1ListRelationTuplesResponse": {
+      "type": "object",
+      "properties": {
+        "relationTuples": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/v1alpha1RelationTuple"
+          },
+          "description": "The relation tuples matching the request query.\n\nThe RelationTuple list is ordered from the newest\nRelationTuple to the oldest."
+        },
+        "nextPageToken": {
+          "type": "string",
+          "description": "The token required to paginate to the next page."
+        },
+        "isLastPage": {
+          "type": "boolean",
+          "description": "Indicates if this is the last page of paginated data.\nIf `is_last_page` is true then using `next_page_token`\nin subsequent requests will return an error."
+        }
+      }
+    },
+    "v1alpha1RelationTuple": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "The namespace this relation tuple lives in."
+        },
+        "object": {
+          "type": "string",
+          "description": "The object related by this tuple.\nObjects live within the namespace of the tuple."
+        },
+        "relation": {
+          "type": "string",
+          "description": "The relation between an Object and a Subject."
+        },
+        "subject": {
+          "$ref": "#/definitions/v1alpha1Subject",
+          "description": "The subject related by this tuple.\nA Subject either represents a concrete subject id or\na SubjectSet that expands to more Subjects."
+        }
+      },
+      "description": "RelationTuple relates an Object with a Subject.\n\nWhile a tuple reflects a relationship between Object\nand Subject, they do not completely define the effective ACLs."
+    },
+    "v1alpha1Subject": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "A concrete id of the subject."
+        },
+        "set": {
+          "$ref": "#/definitions/v1alpha1SubjectSet",
+          "description": "A subject set that expands to more Subjects\n(used for inheritance)."
+        }
+      },
+      "description": "Subject is either a concrete subject id or\na subject set expanding to more Subjects."
+    },
+    "v1alpha1SubjectSet": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "The namespace of the object and relation\nreferenced in this subject set."
+        },
+        "object": {
+          "type": "string",
+          "description": "The object selected by the subjects."
+        },
+        "relation": {
+          "type": "string",
+          "description": "The relation to the object by the subjects."
+        }
+      },
+      "description": "SubjectSet refers to all subjects which have\nthe same `relation` to an `object`.\nIt is also used for inheritance."
+    }
+  }
+}
