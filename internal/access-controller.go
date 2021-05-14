@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/buraksezer/consistent"
-	"github.com/cespare/xxhash"
 	"github.com/hashicorp/memberlist"
 
 	aclpb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
@@ -18,6 +18,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
+
+var peerNamespaceConfigs PeerNamespaceConfigStore = &inmemPeerNamespaceConfigStore{
+	configs: make(map[string]map[string]map[time.Time]*aclpb.NamespaceConfig),
+}
 
 type AccessController struct {
 	aclpb.UnimplementedCheckServiceServer
@@ -29,43 +33,151 @@ type AccessController struct {
 	*Node
 	RelationTupleStore
 	NamespaceManager
-	ClusterNodeConfigs
-}
-
-type ClusterNodeConfigs struct {
-	ServerID   string
-	Advertise  string
-	Join       string
-	NodePort   int
-	ServerPort int
-}
-
-type hasher struct{}
-
-func (h hasher) Sum64(data []byte) uint64 {
-	return xxhash.Sum64(data)
+	NodeConfigs
 }
 
 type AccessControllerOption func(*AccessController)
 
+// WithStore sets the AccessController's RelationTupleStore.
 func WithStore(store RelationTupleStore) AccessControllerOption {
 	return func(ac *AccessController) {
 		ac.RelationTupleStore = store
 	}
 }
 
+// WithNamespaceManager sets the AccessController's NamespaceManager.
 func WithNamespaceManager(m NamespaceManager) AccessControllerOption {
 	return func(ac *AccessController) {
 		ac.NamespaceManager = m
 	}
 }
 
-func WithClusterNodeConfigs(cfg ClusterNodeConfigs) AccessControllerOption {
+// WithNodeConfigs sets the AccessController's NodeConfigs.
+func WithNodeConfigs(cfg NodeConfigs) AccessControllerOption {
 	return func(ac *AccessController) {
-		ac.ClusterNodeConfigs = cfg
+		ac.NodeConfigs = cfg
 	}
 }
 
+// watchNamespaceConfigs is a background process that continuously monitors changes to
+// namespace configurations. When changes happen, these config changes are made local
+// to this node in an in-memory namespace config store.
+func (a *AccessController) watchNamespaceConfigs(ctx context.Context) {
+
+	for {
+
+		// Watch the top 3 most recent changes per namespace.
+		//
+		// The assumption here is that each peer/node of the cluster should
+		// have enough time to have processed one of the last three changes per
+		// namespace. At a later date we'll capture metrics around this to quantify
+		// a more accurate threshold based on quantitative analysis from running in
+		// production.
+		iter, err := a.NamespaceManager.TopChanges(context.TODO(), 3)
+		if err != nil {
+			// todo: handle error
+		}
+
+		for iter.Next() {
+			change, err := iter.Value()
+			if err != nil {
+				log.Errorf("Failed to fetch the next value from the ChangelogIterator: %v", err)
+			}
+
+			namespace := change.Namespace
+			config := change.Config
+			timestamp := change.Timestamp
+
+			switch change.Operation {
+			case UpdateNamespace:
+				err := peerNamespaceConfigs.SetNamespaceConfigSnapshot(a.ServerID, namespace, config, timestamp)
+				if err != nil {
+					// todo: handle error
+				}
+			default:
+				panic("An expected namespace operation was encountered")
+			}
+		}
+		if err := iter.Close(ctx); err != nil {
+			// todo: handle error
+		}
+
+		time.Sleep(2 * time.Second)
+	}
+}
+
+// chooseNamespaceConfigSnapshot selects the most recent namespace config snapshot that is
+// common to all peers/nodes within the cluster that this node is a part of.
+func (a *AccessController) chooseNamespaceConfigSnapshot(namespace string) (*NamespaceConfigSnapshot, error) {
+
+	peerSnapshots, err := peerNamespaceConfigs.ListNamespaceConfigSnapshots(namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	min := math.MaxInt32
+	var peerWithMin string
+
+	commonTimestamps := map[time.Time]struct{}{}
+
+	if len(peerSnapshots) >= 1 {
+
+		var s map[time.Time]*aclpb.NamespaceConfig
+
+		for peer, snapshots := range peerSnapshots {
+			if len(snapshots) < min {
+				min = len(snapshots)
+				peerWithMin = peer
+				s = snapshots
+			}
+		}
+
+		if len(peerSnapshots) > 1 {
+			for timestamp := range s {
+				for peer, snapshots := range peerSnapshots {
+					if peer != peerWithMin {
+						for ts := range snapshots {
+							if timestamp.Equal(ts) {
+								commonTimestamps[timestamp] = struct{}{}
+							}
+						}
+					}
+				}
+			}
+		} else {
+			for ts := range s {
+				commonTimestamps[ts] = struct{}{}
+			}
+		}
+
+		if len(commonTimestamps) < 1 {
+			return nil, fmt.Errorf("No common namespace config snapshot timestamp(s) were found.")
+		}
+	} else {
+		// If this branch of logic occurs it's reasonble to panic because under normal operating
+		// conditions this should never occur. If it does occur it indicates something seriously
+		// wrong in the logic leading up to this path.
+		panic("Underlying system invariants were not met! No namespace config snapshots were found for any peer (local included).")
+	}
+
+	var selectedTS time.Time
+	for t := range commonTimestamps {
+		if t.After(selectedTS) {
+			selectedTS = t
+		}
+	}
+
+	config := peerSnapshots[peerWithMin][selectedTS]
+
+	snapshot := &NamespaceConfigSnapshot{
+		Config:    config,
+		Timestamp: selectedTS,
+	}
+
+	return snapshot, nil
+}
+
+// NewAccessController constructs a new AccessController with the options provided.
 func NewAccessController(opts ...AccessControllerOption) (*AccessController, error) {
 
 	ac := AccessController{}
@@ -73,6 +185,36 @@ func NewAccessController(opts ...AccessControllerOption) (*AccessController, err
 	for _, opt := range opts {
 		opt(&ac)
 	}
+
+	// Pre-load 3 most recent namespace config changes into the namespace config snapshot store.
+	iter, err := ac.NamespaceManager.TopChanges(context.Background(), 3)
+	if err != nil {
+		return nil, err
+	}
+
+	for iter.Next() {
+		entry, err := iter.Value()
+		if err != nil {
+			return nil, err
+		}
+
+		switch entry.Operation {
+		case UpdateNamespace:
+			err = peerNamespaceConfigs.SetNamespaceConfigSnapshot(ac.ServerID, entry.Namespace, entry.Config, entry.Timestamp)
+			if err != nil {
+				return nil, err
+			}
+		default:
+			panic("An expected namespace operation was encountered")
+		}
+
+	}
+	if err := iter.Close(context.Background()); err != nil {
+		return nil, err
+	}
+
+	// Start watching for namespace configuration changes in the background
+	go ac.watchNamespaceConfigs(context.Background())
 
 	ring := consistent.New(nil, consistent.Config{
 		Hasher:            &hasher{},
@@ -91,6 +233,7 @@ func NewAccessController(opts ...AccessControllerOption) (*AccessController, err
 	ac.Node = node
 
 	memberlistConfig := memberlist.DefaultLANConfig()
+	memberlistConfig.PushPullInterval = 10 * time.Second
 	memberlistConfig.Name = node.ID
 
 	if ac.Advertise != "" {
@@ -99,6 +242,7 @@ func NewAccessController(opts ...AccessControllerOption) (*AccessController, err
 
 	memberlistConfig.BindPort = ac.NodePort
 	memberlistConfig.Events = node
+	memberlistConfig.Delegate = &ac
 
 	list, err := memberlist.Create(memberlistConfig)
 	if err != nil {
@@ -107,7 +251,7 @@ func NewAccessController(opts ...AccessControllerOption) (*AccessController, err
 	node.Memberlist = list
 
 	meta, err := json.Marshal(NodeMetadata{
-		Port: ac.ServerPort,
+		ServerPort: ac.ServerPort,
 	})
 	if err != nil {
 		return nil, err
@@ -299,13 +443,30 @@ func (a *AccessController) checkRewrite(ctx context.Context, rule *aclpb.Rewrite
 
 func (a *AccessController) check(ctx context.Context, namespace, object, relation, subject string) (bool, error) {
 
-	if peerChecksum, ok := FromContext(ctx); ok {
+	if peerChecksum, ok := ChecksumFromContext(ctx); ok {
 		// The hash ring checksum of the peer should always be present if the
 		// request is proxied from another access-controller. If the request
 		// is made externally it won't be present.
 		if a.Hashring.Checksum() != peerChecksum {
 			return false, status.Error(codes.Internal, "Hashring checksums don't match. Retry again soon!")
 		}
+	}
+
+	var snapshotTimestamp time.Time
+
+	// The namespace config timestamp from the peer should always be present if
+	// the request is proxied from another access-controller. If the request is
+	// made externally, we select a namespace config timestamp and forward it on.
+	peerNamespaceCfgTs, ok := NamespaceConfigTimestampFromContext(ctx)
+	if !ok {
+		snapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
+		if err != nil {
+			return false, err
+		}
+
+		snapshotTimestamp = snapshot.Timestamp
+	} else {
+		snapshotTimestamp = peerNamespaceCfgTs
 	}
 
 	forwardingNodeID := a.Hashring.LocateKey([]byte(object))
@@ -324,6 +485,7 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 		}
 
 		modifiedCtx := context.WithValue(ctx, hashringChecksumKey, a.Hashring.Checksum())
+		modifiedCtx = context.WithValue(modifiedCtx, nsConfigSnapshotTimestampKey, snapshotTimestamp)
 
 		subject := SubjectID{ID: subject}
 
@@ -362,6 +524,8 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 			}
 
 			modifiedCtx := context.WithValue(ctx, hashringChecksumKey, a.Hashring.Checksum())
+			modifiedCtx = context.WithValue(modifiedCtx, nsConfigSnapshotTimestampKey, snapshotTimestamp)
+
 			resp, err = client.Check(modifiedCtx, req)
 		}
 
@@ -371,13 +535,20 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 	}
 
 EVAL:
-	rewrite, err := a.NamespaceManager.GetRewrite(ctx, namespace, relation)
+
+	cfg, err := peerNamespaceConfigs.GetNamespaceConfigSnapshot(a.ServerID, namespace, snapshotTimestamp)
 	if err != nil {
 		return false, err
 	}
 
+	if cfg == nil {
+		message := fmt.Sprintf("No namespace configuration was found for namespace '%s' at timestamp '%s'", namespace, snapshotTimestamp)
+		return false, status.Error(codes.Internal, message) // todo: choose appropriate code here
+	}
+
+	rewrite := rewriteFromNamespaceConfig(relation, cfg)
 	if rewrite == nil {
-		message := fmt.Sprintf("No namespace configuration for relation '%s#%s' exists", namespace, relation)
+		message := fmt.Sprintf("No rewrite snapshot for relation '%s#%s' exists at timestamp '%s'", namespace, relation, snapshotTimestamp)
 		return false, status.Error(codes.InvalidArgument, message)
 	}
 
@@ -626,6 +797,100 @@ func (a *AccessController) ReadConfig(ctx context.Context, req *aclpb.ReadConfig
 	return resp, nil
 }
 
+func (a *AccessController) NodeMeta(limit int) []byte {
+	var meta []byte
+	return meta
+}
+
+func (a *AccessController) NotifyMsg(msg []byte) {}
+
+func (a *AccessController) GetBroadcasts(overhead, limit int) [][]byte {
+	var buf [][]byte
+	return buf
+}
+
+// LocalState is used for a TCP Push/Pull between nodes in the cluster. The
+// buffer returned here is broadcasted to the other nodes in the cluster
+// in addition to the membership information. Any data can be sent here.
+//
+// For more information see https://pkg.go.dev/github.com/hashicorp/memberlist#Delegate
+func (a *AccessController) LocalState(join bool) []byte {
+
+	configs, err := peerNamespaceConfigs.GetNamespaceConfigSnapshots(a.ServerID)
+	if err != nil {
+		log.Errorf("Failed to fetch namespace config snapshots for this node's LocalState: %v", err)
+	}
+
+	if configs == nil {
+		panic("This node's local namespace config snapshots do not exist. Something is seriously wrong!")
+	}
+
+	meta := NodeMetadata{
+		NodeID:                   a.ID,
+		ServerPort:               a.ServerPort,
+		NamespaceConfigSnapshots: configs,
+	}
+
+	data, err := json.Marshal(meta)
+	if err != nil {
+		log.Errorf("Failed to json.Marshal this node's metadata: %v", err)
+	}
+
+	return data
+}
+
+// MergeRemoteState is invoked after a TCP Push/Pull between nodes in the cluster.
+// This is the state received from the remote node and is the result of the
+// remote nodes's LocalState call.
+//
+// For more information see https://pkg.go.dev/github.com/hashicorp/memberlist#Delegate
+func (a *AccessController) MergeRemoteState(buf []byte, join bool) {
+
+	var remoteState NodeMetadata
+	if err := json.Unmarshal(buf, &remoteState); err != nil {
+		log.Errorf("Failed to json.Unmarshal the remote peer's metadata: %v", err)
+	}
+
+	for namespace, configSnapshots := range remoteState.NamespaceConfigSnapshots {
+
+		for ts, config := range configSnapshots {
+			err := peerNamespaceConfigs.SetNamespaceConfigSnapshot(remoteState.NodeID, namespace, config, ts)
+			if err != nil {
+				log.Errorf("Failed to write namespace config snapshot in MergeRemoteState: %v", err)
+			}
+		}
+	}
+}
+
 func (a *AccessController) Close() error {
 	return a.Node.Memberlist.Leave(5 * time.Second)
+}
+
+// rewriteFromNamespaceConfig returns the rewrite rule from the provided namespace config for the
+// relation given. If the rewrite rule is 'nil' (e.g. no rewrite rule specified), the _this rule
+// is returned, indicating the rewrite is self-referencing by default.
+func rewriteFromNamespaceConfig(relation string, config *aclpb.NamespaceConfig) *aclpb.Rewrite {
+
+	for _, r := range config.GetRelations() {
+
+		if r.GetName() == relation {
+			rewrite := r.GetRewrite()
+
+			if rewrite == nil {
+				rewrite = &aclpb.Rewrite{
+					RewriteOperation: &aclpb.Rewrite_Union{
+						Union: &aclpb.SetOperation{
+							Children: []*aclpb.SetOperation_Child{
+								{ChildType: &aclpb.SetOperation_Child_XThis{}},
+							},
+						},
+					},
+				}
+			}
+
+			return rewrite
+		}
+	}
+
+	return nil
 }

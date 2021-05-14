@@ -20,7 +20,7 @@ import (
 	aclpb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
 	ac "github.com/authorizer-tech/access-controller/internal"
 	"github.com/authorizer-tech/access-controller/internal/datastores"
-	"github.com/authorizer-tech/access-controller/internal/namespace-manager/inmem"
+	"github.com/authorizer-tech/access-controller/internal/namespace-manager/postgres"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -35,8 +35,8 @@ var (
 var serverID = flag.String("id", uuid.New().String(), "A unique identifier for the server. Defaults to a new uuid.")
 var nodePort = flag.Int("node-port", 7946, "The bind port for the cluster node")
 var advertise = flag.String("advertise", "", "The address that this node advertises on within the cluster")
-var grpcPort = flag.Int("--grpc-port", 50052, "The bind port for the grpc server")
-var httpPort = flag.Int("--http-port", 8082, "The bind port for the grpc-gateway http server")
+var grpcPort = flag.Int("grpc-port", 50052, "The bind port for the grpc server")
+var httpPort = flag.Int("http-port", 8082, "The bind port for the grpc-gateway http server")
 var join = flag.String("join", "", "A comma-separated list of 'host:port' addresses for nodes in the cluster to join to")
 var insecure = flag.Bool("insecure", false, "Run in insecure mode (no tls)")
 var namespaceConfigPath = flag.String("namespace-config", "./testdata/namespace-configs", "The path to the namespace configurations")
@@ -89,9 +89,9 @@ func main() {
 		ConnPool: pool,
 	}
 
-	m, err := inmem.NewNamespaceManager(*namespaceConfigPath)
+	m, err := postgres.NewNamespaceManager(pool)
 	if err != nil {
-		log.Fatalf("Failed to initialize in-memory NamespaceManager: %v", err)
+		log.Fatalf("Failed to initialize postgres NamespaceManager: %v", err)
 	}
 
 	log.Info("Starting access-controller")
@@ -103,7 +103,7 @@ func main() {
 	ctrlOpts := []ac.AccessControllerOption{
 		ac.WithStore(datastore),
 		ac.WithNamespaceManager(m),
-		ac.WithClusterNodeConfigs(ac.ClusterNodeConfigs{
+		ac.WithNodeConfigs(ac.NodeConfigs{
 			ServerID:   *serverID,
 			Advertise:  *advertise,
 			Join:       *join,

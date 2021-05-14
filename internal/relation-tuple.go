@@ -6,12 +6,11 @@ import (
 	"strings"
 
 	pb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
-	"github.com/pkg/errors"
 )
 
 var ErrInvalidSubjectSetString = fmt.Errorf("The provided SubjectSet string is malformed.")
 
-// Object representas a namespace and id in the form of `namespace:object_id`
+// Object represents a namespace and object id.
 type Object struct {
 	Namespace string
 	ID        string
@@ -52,6 +51,11 @@ func (s *SubjectID) String() string {
 }
 
 func (s *SubjectID) ToProto() *pb.Subject {
+
+	if s == nil {
+		return nil
+	}
+
 	return &pb.Subject{
 		Ref: &pb.Subject_Id{
 			Id: s.ID,
@@ -82,6 +86,10 @@ func (s SubjectSet) MarshalJSON() ([]byte, error) {
 }
 
 func (s *SubjectSet) ToProto() *pb.Subject {
+	if s == nil {
+		return nil
+	}
+
 	return &pb.Subject{
 		Ref: &pb.Subject_Set{
 			Set: &pb.SubjectSet{
@@ -93,15 +101,17 @@ func (s *SubjectSet) ToProto() *pb.Subject {
 	}
 }
 
+// FromString parses str and returns the Subject (SubjectSet specifically)
+// or an error if the string was malformed in some way.
 func (s *SubjectSet) FromString(str string) (Subject, error) {
 	parts := strings.Split(str, "#")
 	if len(parts) != 2 {
-		return nil, errors.WithStack(ErrInvalidSubjectSetString)
+		return nil, ErrInvalidSubjectSetString
 	}
 
 	innerParts := strings.Split(parts[0], ":")
 	if len(innerParts) != 2 {
-		return nil, errors.WithStack(ErrInvalidSubjectSetString)
+		return nil, ErrInvalidSubjectSetString
 	}
 
 	s.Namespace = innerParts[0]
@@ -125,6 +135,11 @@ func (r *InternalRelationTuple) String() string {
 
 // ToProto serializes r in it's equivalent protobuf format.
 func (r *InternalRelationTuple) ToProto() *pb.RelationTuple {
+
+	if r == nil {
+		return nil
+	}
+
 	return &pb.RelationTuple{
 		Namespace: r.Namespace,
 		Object:    r.Object,
@@ -137,16 +152,17 @@ func (r *InternalRelationTuple) ToProto() *pb.RelationTuple {
 // a SubjectSet (namespace:object#relation). If the string is not formatted
 // as a SubjectSet then an error is returned.
 func SubjectSetFromString(s string) (SubjectSet, error) {
+
 	subjectSet := SubjectSet{}
 
 	parts := strings.Split(s, "#")
 	if len(parts) != 2 {
-		return subjectSet, errors.WithStack(ErrInvalidSubjectSetString)
+		return subjectSet, ErrInvalidSubjectSetString
 	}
 
 	innerParts := strings.Split(parts[0], ":")
 	if len(innerParts) != 2 {
-		return subjectSet, errors.WithStack(ErrInvalidSubjectSetString)
+		return subjectSet, ErrInvalidSubjectSetString
 	}
 
 	subjectSet.Namespace = innerParts[0]

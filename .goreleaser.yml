@@ -1,0 +1,42 @@
+project_name: access-controller
+
+before:
+  hooks:
+    - go mod download
+    - go generate ./...
+builds:
+  - main: ./cmd/access-controller/main.go
+    binary: bin/access-controller
+    env:
+      - CGO_ENABLED=0
+    goarch:
+      - amd64
+    goos:
+      - linux
+      - darwin
+archives:
+  - replacements:
+      darwin: Darwin
+      linux: Linux
+      386: i386
+      amd64: x86_64
+dockers:
+  -
+    image_templates:
+    - "authorizer-tech/access-controller:{{ .Tag }}"
+    - "authorizer-tech/access-controller:v{{ .Major }}"
+    - "authorizer-tech/access-controller:v{{ .Major }}.{{ .Minor }}"
+    - "authorizer-tech/access-controller:latest"
+    - "gcr.io/jon-whit/authorizer-tech/access-controller"
+    extra_files:
+    - testdata
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ .Tag }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
