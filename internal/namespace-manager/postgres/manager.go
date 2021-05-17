@@ -2,12 +2,10 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"time"
 
 	"github.com/doug-martin/goqu/v9"
-	"github.com/jackc/pgx/v4"
-	"github.com/jackc/pgx/v4/pgxpool"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	aclpb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
@@ -15,30 +13,140 @@ import (
 )
 
 type sqlNamespaceManager struct {
-	db *pgxpool.Pool
+	db *sql.DB
 }
 
 // NewNamespaceManager instantiates a namespace manager that is backed by postgres
 // for persistence.
-func NewNamespaceManager(db *pgxpool.Pool) (ac.NamespaceManager, error) {
+func NewNamespaceManager(db *sql.DB) (ac.NamespaceManager, error) {
 
 	m := sqlNamespaceManager{
-		db: db,
+		db,
 	}
 
 	return &m, nil
 }
 
-// WriteConfig upserts the provided namespace configuration. On conflict, the existing namespace
-// configuration is overwritten.
-func (m *sqlNamespaceManager) WriteConfig(ctx context.Context, cfg *aclpb.NamespaceConfig) error {
+// AddConfig appends the provided namespace configuration. On conflict, an ErrNamespaceAlreadyExists is
+// returned.
+func (m *sqlNamespaceManager) AddConfig(ctx context.Context, cfg *aclpb.NamespaceConfig) error {
 
-	jsonConfig, err := json.Marshal(cfg)
+	jsonConfig, err := protojson.Marshal(cfg)
 	if err != nil {
 		return err
 	}
 
-	txn, err := m.db.Begin(ctx)
+	txn, err := m.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	var count int
+	row := txn.QueryRow(`SELECT COUNT(namespace) FROM "namespace-configs" WHERE namespace=$1`, cfg.GetName())
+	if err := row.Scan(&count); err != nil {
+		return err
+	}
+
+	if count > 0 {
+		return ac.ErrNamespaceAlreadyExists
+	}
+
+	ins1 := goqu.Insert("namespace-configs").
+		Cols("namespace", "config", "timestamp").
+		Vals(
+			goqu.Vals{cfg.Name, jsonConfig, goqu.L("NOW()")},
+		)
+
+	ins2 := goqu.Insert("namespace-changelog").
+		Cols("namespace", "operation", "config", "timestamp").
+		Vals(
+			goqu.Vals{cfg.Name, ac.AddNamespace, jsonConfig, goqu.L("NOW()")}, // todo: make sure this is an appropriate txn commit timestamp
+		)
+
+	sql1, args1, err := ins1.ToSQL()
+	if err != nil {
+		return err
+	}
+
+	sql2, args2, err := ins2.ToSQL()
+	if err != nil {
+		return err
+	}
+
+	_, err = txn.Exec(sql1, args1...)
+	if err != nil {
+		return err
+	}
+
+	_, err = txn.Exec(sql2, args2...)
+	if err != nil {
+		return err
+	}
+
+	return txn.Commit()
+}
+
+// GetConfig fetches the latest namespace configuration snapshot. If no namespace config exists for the provided
+// namespace 'nil' is returned. If any error occurs with the underlying txn an error is returned.
+func (m *sqlNamespaceManager) GetConfig(ctx context.Context, namespace string) (*aclpb.NamespaceConfig, error) {
+
+	query := `SELECT config FROM "namespace-configs" WHERE namespace = $1 AND timestamp = (SELECT MAX(timestamp) FROM "namespace-configs" WHERE namespace = $1)`
+
+	row := m.db.QueryRow(query, namespace)
+
+	var jsonConfig string
+	if err := row.Scan(&jsonConfig); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	var config aclpb.NamespaceConfig
+	if err := protojson.Unmarshal([]byte(jsonConfig), &config); err != nil {
+		return nil, err
+	}
+
+	return &config, nil
+}
+
+func (m *sqlNamespaceManager) UpsertRelation(ctx context.Context, namespace string, relation *aclpb.Relation) error {
+
+	txn, err := m.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	row := txn.QueryRow(`SELECT config FROM "namespace-configs" WHERE timestamp = (SELECT MAX(timestamp) FROM "namespace-configs" WHERE namespace = $1)`, namespace)
+
+	var cfgStr string
+	if err := row.Scan(&cfgStr); err != nil {
+		if err == sql.ErrNoRows {
+			return ac.ErrNamespaceDoesntExist
+		}
+		return err
+	}
+
+	var cfg aclpb.NamespaceConfig
+	if err := protojson.Unmarshal([]byte(cfgStr), &cfg); err != nil {
+		return err
+	}
+
+	found := false
+	for i, r := range cfg.GetRelations() {
+		if r.GetName() == relation.GetName() {
+			found = true
+			cfg.Relations[i] = relation
+			break
+		}
+	}
+
+	if !found {
+		cfg.Relations = append(cfg.Relations, relation)
+	}
+
+	jsonConfig, err := protojson.Marshal(&cfg)
 	if err != nil {
 		return err
 	}
@@ -50,7 +158,7 @@ func (m *sqlNamespaceManager) WriteConfig(ctx context.Context, cfg *aclpb.Namesp
 		)
 
 	ins2 := goqu.Insert("namespace-changelog").
-		Cols("namespace", "operation", "config", "commited").
+		Cols("namespace", "operation", "config", "timestamp").
 		Vals(
 			goqu.Vals{cfg.Name, ac.UpdateNamespace, jsonConfig, goqu.L("NOW()")}, // todo: make sure this is an appropriate txn commit timestamp
 		)
@@ -65,42 +173,17 @@ func (m *sqlNamespaceManager) WriteConfig(ctx context.Context, cfg *aclpb.Namesp
 		return err
 	}
 
-	_, err = txn.Exec(ctx, sql1, args1...)
+	_, err = txn.Exec(sql1, args1...)
 	if err != nil {
 		return err
 	}
 
-	_, err = txn.Exec(ctx, sql2, args2...)
+	_, err = txn.Exec(sql2, args2...)
 	if err != nil {
 		return err
 	}
 
-	return txn.Commit(ctx)
-}
-
-// GetConfig fetches the latest namespace configuration snapshot. If no namespace config exists for the provided
-// namespace 'nil' is returned. If any error occurs with the underlying txn an error is returned.
-func (m *sqlNamespaceManager) GetConfig(ctx context.Context, namespace string) (*aclpb.NamespaceConfig, error) {
-
-	sql := `SELECT config FROM "namespace-configs" WHERE namespace = $1 AND timestamp = (SELECT MAX(timestamp) FROM "namespace-configs" WHERE namespace = $1)`
-
-	row := m.db.QueryRow(ctx, sql, namespace)
-
-	var jsonConfig string
-	if err := row.Scan(&jsonConfig); err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, nil
-		}
-
-		return nil, err
-	}
-
-	var config aclpb.NamespaceConfig
-	if err := json.Unmarshal([]byte(jsonConfig), &config); err != nil {
-		return nil, err
-	}
-
-	return &config, nil
+	return txn.Commit()
 }
 
 // GetRewrite fetches the latest namespace config rewrite for the (namespace, relation) pair. If no namespace
@@ -148,12 +231,12 @@ func (m *sqlNamespaceManager) GetRewrite(ctx context.Context, namespace, relatio
 func (m *sqlNamespaceManager) TopChanges(ctx context.Context, n uint) (ac.ChangelogIterator, error) {
 
 	sql := `
-	SELECT "namespace", "operation", "config", "commited" FROM "namespace-changelog" AS "cfg1" 
-	WHERE "commited" IN (SELECT "commited" FROM "namespace-changelog" AS "cfg2" 
-	WHERE ("cfg1"."namespace" = "cfg2"."namespace") ORDER BY "commited" DESC LIMIT $1) 
-	ORDER BY "namespace" ASC, "commited" ASC`
+	SELECT "namespace", "operation", "config", "timestamp" FROM "namespace-changelog" AS "cfg1" 
+	WHERE "timestamp" IN (SELECT "timestamp" FROM "namespace-changelog" AS "cfg2" 
+	WHERE ("cfg1"."namespace" = "cfg2"."namespace") ORDER BY "timestamp" DESC LIMIT $1) 
+	ORDER BY "namespace" ASC, "timestamp" ASC`
 
-	rows, err := m.db.Query(ctx, sql, n)
+	rows, err := m.db.Query(sql, n)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +249,7 @@ func (m *sqlNamespaceManager) TopChanges(ctx context.Context, n uint) (ac.Change
 // iterator provides an implementation of a ChangelogIterator ontop of a standard
 // pgx.Rows iterator.
 type iterator struct {
-	rows pgx.Rows
+	rows *sql.Rows
 }
 
 // Next prepares the next row for reading. It returns true if there is another row and false if no more rows are available.
@@ -186,6 +269,8 @@ func (i *iterator) Value() (*ac.NamespaceChangelogEntry, error) {
 
 	var op ac.NamespaceOperation
 	switch operation {
+	case "ADD":
+		op = ac.AddNamespace
 	case "UPDATE":
 		op = ac.UpdateNamespace
 	default:

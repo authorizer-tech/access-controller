@@ -2,11 +2,15 @@ package accesscontroller
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
 	aclpb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
 )
+
+var ErrNamespaceAlreadyExists error = errors.New("The provided namespace already exists.")
+var ErrNamespaceDoesntExist error = errors.New("The provided namespace doesn't exist, please add it first.")
 
 var nsConfigSnapshotTimestampKey ctxKey
 
@@ -25,6 +29,7 @@ func NamespaceConfigTimestampFromContext(ctx context.Context) (time.Time, bool) 
 type NamespaceOperation string
 
 const (
+	AddNamespace    NamespaceOperation = "ADD"
 	UpdateNamespace NamespaceOperation = "UPDATE"
 )
 
@@ -61,12 +66,16 @@ type NamespaceChangelogEntry struct {
 // NamespaceManager defines an interface to manage/administer namespace configs.
 type NamespaceManager interface {
 
-	// WriteConfig appends the provided namespace configuration along with a timestamp
+	// AddConfig appends the provided namespace configuration along with a timestamp
 	// capturing the time at which the txn was committed.
-	WriteConfig(ctx context.Context, cfg *aclpb.NamespaceConfig) error
+	AddConfig(ctx context.Context, cfg *aclpb.NamespaceConfig) error
 
 	// GetConfig fetches the latest namespace config.
 	GetConfig(ctx context.Context, namespace string) (*aclpb.NamespaceConfig, error)
+
+	// UpsertRelation upserts the given relation under the namespace config provided. This
+	// creates a new namespace config snapshot for the namespace.
+	UpsertRelation(ctx context.Context, namespace string, relation *aclpb.Relation) error
 
 	// GetRewrite fetches the rewrite rule for the given (namespace, relation) tuple using
 	// the latest namespace config available.

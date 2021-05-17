@@ -2,11 +2,11 @@ package datastores
 
 import (
 	"context"
-	"time"
+	"database/sql"
 
 	"github.com/doug-martin/goqu/v9"
 	_ "github.com/doug-martin/goqu/v9/dialect/postgres"
-	"github.com/jackc/pgx/v4/pgxpool"
+	_ "github.com/lib/pq"
 
 	aclpb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
 	ac "github.com/authorizer-tech/access-controller/internal"
@@ -14,13 +14,10 @@ import (
 )
 
 type SQLStore struct {
-	ConnPool *pgxpool.Pool
+	DB *sql.DB
 }
 
 func (s *SQLStore) SubjectSets(ctx context.Context, object ac.Object, relations ...string) ([]ac.SubjectSet, error) {
-
-	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
 
 	sqlbuilder := goqu.Dialect("postgres").From(object.Namespace).Select("user").Where(
 		goqu.Ex{
@@ -35,7 +32,7 @@ func (s *SQLStore) SubjectSets(ctx context.Context, object ac.Object, relations 
 		return nil, err
 	}
 
-	rows, err := s.ConnPool.Query(cctx, sql, args...)
+	rows, err := s.DB.Query(sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +71,7 @@ func (s *SQLStore) RowCount(ctx context.Context, query ac.RelationTupleQuery) (i
 		return -1, err
 	}
 
-	row := s.ConnPool.QueryRow(ctx, sql, args...)
+	row := s.DB.QueryRow(sql, args...)
 
 	var count int64
 	if err := row.Scan(&count); err != nil {
@@ -115,7 +112,7 @@ func (s *SQLStore) ListRelationTuples(ctx context.Context, query *aclpb.ListRela
 		return nil, err
 	}
 
-	rows, err := s.ConnPool.Query(ctx, sql, args...)
+	rows, err := s.DB.Query(sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +143,7 @@ func (s *SQLStore) ListRelationTuples(ctx context.Context, query *aclpb.ListRela
 
 func (s *SQLStore) TransactRelationTuples(ctx context.Context, tupleInserts []*ac.InternalRelationTuple, tupleDeletes []*ac.InternalRelationTuple) error {
 
-	txn, err := s.ConnPool.Begin(ctx)
+	txn, err := s.DB.Begin()
 	if err != nil {
 		return err
 	}
@@ -161,7 +158,7 @@ func (s *SQLStore) TransactRelationTuples(ctx context.Context, tupleInserts []*a
 			return err
 		}
 
-		_, err = txn.Exec(ctx, sql, args...)
+		_, err = txn.Exec(sql, args...)
 		if err != nil {
 			return err
 		}
@@ -177,7 +174,7 @@ func (s *SQLStore) TransactRelationTuples(ctx context.Context, tupleInserts []*a
 			return err
 		}
 
-		_, err = txn.Exec(ctx, sql, args...)
+		_, err = txn.Exec(sql, args...)
 		if err != nil {
 			return err
 		}
@@ -195,7 +192,7 @@ func (s *SQLStore) TransactRelationTuples(ctx context.Context, tupleInserts []*a
 			return err
 		}
 
-		_, err = txn.Exec(ctx, sql, args...)
+		_, err = txn.Exec(sql, args...)
 		if err != nil {
 			return err
 		}
@@ -211,11 +208,11 @@ func (s *SQLStore) TransactRelationTuples(ctx context.Context, tupleInserts []*a
 			return err
 		}
 
-		_, err = txn.Exec(ctx, sql, args...)
+		_, err = txn.Exec(sql, args...)
 		if err != nil {
 			return err
 		}
 	}
 
-	return txn.Commit(ctx)
+	return txn.Commit()
 }

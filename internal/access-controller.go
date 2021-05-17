@@ -89,7 +89,7 @@ func (a *AccessController) watchNamespaceConfigs(ctx context.Context) {
 			timestamp := change.Timestamp
 
 			switch change.Operation {
-			case UpdateNamespace:
+			case AddNamespace, UpdateNamespace:
 				err := peerNamespaceConfigs.SetNamespaceConfigSnapshot(a.ServerID, namespace, config, timestamp)
 				if err != nil {
 					// todo: handle error
@@ -199,7 +199,7 @@ func NewAccessController(opts ...AccessControllerOption) (*AccessController, err
 		}
 
 		switch entry.Operation {
-		case UpdateNamespace:
+		case AddNamespace, UpdateNamespace:
 			err = peerNamespaceConfigs.SetNamespaceConfigSnapshot(ac.ServerID, entry.Namespace, entry.Config, entry.Timestamp)
 			if err != nil {
 				return nil, err
@@ -772,17 +772,33 @@ func (a *AccessController) Expand(ctx context.Context, req *aclpb.ExpandRequest)
 	return resp, nil
 }
 
-func (a *AccessController) WriteConfig(ctx context.Context, req *aclpb.WriteConfigRequest) (*aclpb.WriteConfigResponse, error) {
+func (a *AccessController) AddConfig(ctx context.Context, req *aclpb.AddConfigRequest) (*aclpb.AddConfigResponse, error) {
 
-	if err := a.NamespaceManager.WriteConfig(ctx, req.GetConfig()); err != nil {
+	if req.GetConfig() == nil {
+		return nil, status.Error(codes.InvalidArgument, "The 'config' field is required and cannot be nil.")
+	}
+
+	if req.GetConfig().GetName() == "" {
+		return nil, status.Error(codes.InvalidArgument, "The 'config.name' field is required and cannot be empty.")
+	}
+
+	err := a.NamespaceManager.AddConfig(ctx, req.GetConfig())
+	if err != nil {
+		if err == ErrNamespaceAlreadyExists {
+			return nil, status.Error(codes.AlreadyExists, err.Error())
+		}
+
 		return nil, err
 	}
 
-	resp := &aclpb.WriteConfigResponse{}
-	return resp, nil
+	return &(aclpb.AddConfigResponse{}), nil
 }
 
 func (a *AccessController) ReadConfig(ctx context.Context, req *aclpb.ReadConfigRequest) (*aclpb.ReadConfigResponse, error) {
+
+	if req.GetNamespace() == "" {
+		return nil, status.Error(codes.InvalidArgument, "The 'namespace' field is required and cannot be empty.")
+	}
 
 	config, err := a.NamespaceManager.GetConfig(ctx, req.GetNamespace())
 	if err != nil {
@@ -795,6 +811,32 @@ func (a *AccessController) ReadConfig(ctx context.Context, req *aclpb.ReadConfig
 	}
 
 	return resp, nil
+}
+
+func (a *AccessController) WriteRelation(ctx context.Context, req *aclpb.WriteRelationRequest) (*aclpb.WriteRelationResponse, error) {
+
+	namespace := req.GetNamespace()
+	if namespace == "" {
+		return nil, status.Error(codes.InvalidArgument, "The 'namespace' field is required and cannot be empty.")
+	}
+
+	if req.Relation == nil {
+		return nil, status.Error(codes.InvalidArgument, "The 'relation' field must be set. It cannot be nil.")
+	}
+
+	if req.GetRelation().GetName() == "" {
+		return nil, status.Error(codes.InvalidArgument, "The 'relation.name' field must be set. It cannot be empty.")
+	}
+
+	err := a.NamespaceManager.UpsertRelation(ctx, namespace, req.GetRelation())
+	if err != nil {
+		if err == ErrNamespaceDoesntExist {
+			return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("Namespace '%s' doesn't exist. Please add it first.", namespace))
+		}
+		return nil, err
+	}
+
+	return &(aclpb.WriteRelationResponse{}), nil
 }
 
 func (a *AccessController) NodeMeta(limit int) []byte {

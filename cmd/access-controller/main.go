@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"net"
@@ -14,7 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	gwruntime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"github.com/jackc/pgx/v4/pgxpool"
+	_ "github.com/lib/pq"
 	"github.com/spf13/viper"
 
 	aclpb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
@@ -72,7 +73,7 @@ func main() {
 
 	pgUsername := viper.GetString("POSTGRES_USERNAME")
 	pgPassword := viper.GetString("POSTGRES_PASSWORD")
-	dsn := fmt.Sprintf("postgresql://%s:%s@%s:%d/%s",
+	dsn := fmt.Sprintf("postgresql://%s:%s@%s:%d/%s?sslmode=disable",
 		pgUsername,
 		pgPassword,
 		cfg.Postgres.Host,
@@ -80,16 +81,16 @@ func main() {
 		cfg.Postgres.Database,
 	)
 
-	pool, err := pgxpool.Connect(context.TODO(), dsn)
+	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		log.Fatalf("Failed to establish a connection to Postgres database: %v", err)
 	}
 
 	datastore := &datastores.SQLStore{
-		ConnPool: pool,
+		DB: db,
 	}
 
-	m, err := postgres.NewNamespaceManager(pool)
+	m, err := postgres.NewNamespaceManager(db)
 	if err != nil {
 		log.Fatalf("Failed to initialize postgres NamespaceManager: %v", err)
 	}
