@@ -4,12 +4,41 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	aclpb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
 	"github.com/hashicorp/memberlist"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
+
+type NodeConfigs struct {
+
+	// A unique identifier for this node in the cluster.
+	ServerID string
+
+	// The address used to advertise to other cluster members. Used
+	// for nat traversal.
+	Advertise string
+
+	// A comma-separated list of existing nodes in the cluster to
+	// join this node to.
+	Join string
+
+	// The port that cluster membership gossip is occuring on.
+	NodePort int
+
+	// The port serving the access-controller RPCs.
+	ServerPort int
+}
+
+// NodeMetadata is local data specific to this node within the cluster. The
+// node's metadata is broadcasted periodically to all peers/nodes in the cluster.
+type NodeMetadata struct {
+	NodeID                   string                                          `json:"node-id"`
+	ServerPort               int                                             `json:"port"`
+	NamespaceConfigSnapshots map[string]map[time.Time]*aclpb.NamespaceConfig `json:"namespace-snapshots"`
+}
 
 // Node represents a single node in a cluster. It contains the list
 // of other members in the cluster and clients for communicating with
@@ -23,10 +52,6 @@ type Node struct {
 	Memberlist *memberlist.Memberlist
 	RpcRouter  ClientRouter
 	Hashring   Hashring
-}
-
-type NodeMetadata struct {
-	Port int `json:"port"`
 }
 
 // NotifyJoin is invoked when a new node has joined the cluster.
@@ -43,7 +68,7 @@ func (n *Node) NotifyJoin(member *memberlist.Node) {
 			log.Errorf("Failed to json.Unmarshal the Node metadata: %v", err)
 		}
 
-		remoteAddr := fmt.Sprintf("%s:%d", member.Addr, meta.Port)
+		remoteAddr := fmt.Sprintf("%s:%d", member.Addr, meta.ServerPort)
 
 		opts := []grpc.DialOption{
 			grpc.WithInsecure(),
@@ -77,6 +102,11 @@ func (n *Node) NotifyLeave(member *memberlist.Node) {
 
 	n.Hashring.Remove(member)
 	log.Tracef("hashring checksum: %d", n.Hashring.Checksum())
+
+	err := peerNamespaceConfigs.DeleteNamespaceConfigSnapshots(nodeID)
+	if err != nil {
+		log.Errorf("Failed to delete namespace config snapshots for peer with id '%s'", nodeID)
+	}
 }
 
 // NotifyUpdate is invoked when a node in the cluster is updated,

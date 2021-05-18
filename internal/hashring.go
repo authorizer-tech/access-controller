@@ -8,11 +8,18 @@ import (
 	"sync"
 
 	"github.com/buraksezer/consistent"
+	"github.com/cespare/xxhash"
 )
 
 type ctxKey int
 
 var hashringChecksumKey ctxKey
+
+type hasher struct{}
+
+func (h hasher) Sum64(data []byte) uint64 {
+	return xxhash.Sum64(data)
+}
 
 type HashringMember interface {
 	String() string
@@ -41,16 +48,19 @@ type Hashring interface {
 	Checksum() uint32
 }
 
-// NewContext returns a new Context that carries the hash ring checksum.
-func NewContext(ctx context.Context, hashringChecksum uint32) context.Context {
+// NewContextWithChecksum returns a new Context that carries the hashring checksum.
+func NewContextWithChecksum(ctx context.Context, hashringChecksum uint32) context.Context {
 	return context.WithValue(ctx, hashringChecksumKey, hashringChecksum)
 }
 
-func FromContext(ctx context.Context) (uint32, bool) {
+// ChecksumFromContext extracts the hashring checksum from the provided
+// ctx or returns false if none was found in the ctx.
+func ChecksumFromContext(ctx context.Context) (uint32, bool) {
 	checksum, ok := ctx.Value(hashringChecksumKey).(uint32)
 	return checksum, ok
 }
 
+// ConsistentHashring implements a Hashring using consistent hashing with bounded loads.
 type ConsistentHashring struct {
 	rw   sync.RWMutex
 	Ring *consistent.Consistent
@@ -72,7 +82,7 @@ func (ch *ConsistentHashring) Remove(member HashringMember) {
 	ch.Ring.Remove(member.String())
 }
 
-// LocateKey locates the nearest hashring member to for the given
+// LocateKey locates the nearest hashring member to the given
 // key.
 func (ch *ConsistentHashring) LocateKey(key []byte) string {
 	defer ch.rw.RUnlock()

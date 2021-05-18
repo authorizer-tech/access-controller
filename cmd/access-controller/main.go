@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"net"
@@ -14,13 +15,13 @@ import (
 
 	"github.com/google/uuid"
 	gwruntime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"github.com/jackc/pgx/v4/pgxpool"
+	_ "github.com/lib/pq"
 	"github.com/spf13/viper"
 
 	aclpb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
 	ac "github.com/authorizer-tech/access-controller/internal"
 	"github.com/authorizer-tech/access-controller/internal/datastores"
-	"github.com/authorizer-tech/access-controller/internal/namespace-manager/inmem"
+	"github.com/authorizer-tech/access-controller/internal/namespace-manager/postgres"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -35,8 +36,8 @@ var (
 var serverID = flag.String("id", uuid.New().String(), "A unique identifier for the server. Defaults to a new uuid.")
 var nodePort = flag.Int("node-port", 7946, "The bind port for the cluster node")
 var advertise = flag.String("advertise", "", "The address that this node advertises on within the cluster")
-var grpcPort = flag.Int("--grpc-port", 50052, "The bind port for the grpc server")
-var httpPort = flag.Int("--http-port", 8082, "The bind port for the grpc-gateway http server")
+var grpcPort = flag.Int("grpc-port", 50052, "The bind port for the grpc server")
+var httpPort = flag.Int("http-port", 8082, "The bind port for the grpc-gateway http server")
 var join = flag.String("join", "", "A comma-separated list of 'host:port' addresses for nodes in the cluster to join to")
 var insecure = flag.Bool("insecure", false, "Run in insecure mode (no tls)")
 var namespaceConfigPath = flag.String("namespace-config", "./testdata/namespace-configs", "The path to the namespace configurations")
@@ -72,7 +73,7 @@ func main() {
 
 	pgUsername := viper.GetString("POSTGRES_USERNAME")
 	pgPassword := viper.GetString("POSTGRES_PASSWORD")
-	dsn := fmt.Sprintf("postgresql://%s:%s@%s:%d/%s",
+	dsn := fmt.Sprintf("postgresql://%s:%s@%s:%d/%s?sslmode=disable",
 		pgUsername,
 		pgPassword,
 		cfg.Postgres.Host,
@@ -80,18 +81,18 @@ func main() {
 		cfg.Postgres.Database,
 	)
 
-	pool, err := pgxpool.Connect(context.TODO(), dsn)
+	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		log.Fatalf("Failed to establish a connection to Postgres database: %v", err)
 	}
 
 	datastore := &datastores.SQLStore{
-		ConnPool: pool,
+		DB: db,
 	}
 
-	m, err := inmem.NewNamespaceManager(*namespaceConfigPath)
+	m, err := postgres.NewNamespaceManager(db)
 	if err != nil {
-		log.Fatalf("Failed to initialize in-memory NamespaceManager: %v", err)
+		log.Fatalf("Failed to initialize postgres NamespaceManager: %v", err)
 	}
 
 	log.Info("Starting access-controller")
@@ -103,7 +104,7 @@ func main() {
 	ctrlOpts := []ac.AccessControllerOption{
 		ac.WithStore(datastore),
 		ac.WithNamespaceManager(m),
-		ac.WithClusterNodeConfigs(ac.ClusterNodeConfigs{
+		ac.WithNodeConfigs(ac.NodeConfigs{
 			ServerID:   *serverID,
 			Advertise:  *advertise,
 			Join:       *join,

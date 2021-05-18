@@ -53,13 +53,13 @@
         ]
       },
       "post": {
-        "summary": "Write a new namespace configuration, overwriting any prior one.",
-        "operationId": "NamespaceConfigService_WriteConfig",
+        "summary": "Adds a new namespace configuration. If the namespace already exists,\nan AlreadyExists status code is returned.",
+        "operationId": "NamespaceConfigService_AddConfig",
         "responses": {
           "200": {
             "description": "A successful response.",
             "schema": {
-              "$ref": "#/definitions/v1alpha1WriteConfigResponse"
+              "$ref": "#/definitions/v1alpha1AddConfigResponse"
             }
           },
           "default": {
@@ -75,7 +75,52 @@
             "in": "body",
             "required": true,
             "schema": {
-              "$ref": "#/definitions/v1alpha1WriteConfigRequest"
+              "$ref": "#/definitions/v1alpha1AddConfigRequest"
+            }
+          }
+        ],
+        "tags": [
+          "NamespaceConfigService"
+        ]
+      }
+    },
+    "/authorizer/access-controller/v1alpha1/namespace-configs/{namespace}": {
+      "post": {
+        "summary": "Upserts a relation for the given namespace config.",
+        "operationId": "NamespaceConfigService_WriteRelation",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1alpha1WriteRelationResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "relation": {
+                  "$ref": "#/definitions/v1alpha1Relation"
+                }
+              },
+              "description": "The request for a NamespaceConfigService.WriteRelation rpc."
             }
           }
         ],
@@ -143,6 +188,24 @@
           }
         }
       }
+    },
+    "v1alpha1AddConfigRequest": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "$ref": "#/definitions/v1alpha1NamespaceConfig"
+        }
+      },
+      "description": "The request for a NamespaceConfigService.AddConfig rpc."
+    },
+    "v1alpha1AddConfigResponse": {
+      "type": "object",
+      "properties": {
+        "snaptoken": {
+          "type": "string"
+        }
+      },
+      "description": "The response for a NamespaceConfigService.AddConfig rpc."
     },
     "v1alpha1ComputedSubjectset": {
       "type": "object",
@@ -225,23 +288,9 @@
         }
       }
     },
-    "v1alpha1WriteConfigRequest": {
+    "v1alpha1WriteRelationResponse": {
       "type": "object",
-      "properties": {
-        "config": {
-          "$ref": "#/definitions/v1alpha1NamespaceConfig"
-        }
-      },
-      "description": "The request for a NamespaceConfigService.WriteConfig rpc."
-    },
-    "v1alpha1WriteConfigResponse": {
-      "type": "object",
-      "properties": {
-        "snaptoken": {
-          "type": "string"
-        }
-      },
-      "description": "The response for a NamespaceConfigService.WriteConfig rpc."
+      "description": "The response for a NamespaceConfigService.WriteRelation rpc."
     }
   }
 }
