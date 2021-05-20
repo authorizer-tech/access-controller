@@ -19,11 +19,11 @@ type SQLStore struct {
 
 func (s *SQLStore) SubjectSets(ctx context.Context, object ac.Object, relations ...string) ([]ac.SubjectSet, error) {
 
-	sqlbuilder := goqu.Dialect("postgres").From(object.Namespace).Select("user").Where(
+	sqlbuilder := goqu.Dialect("postgres").From(object.Namespace).Select("subject").Where(
 		goqu.Ex{
 			"object":   object.ID,
 			"relation": relations,
-			"user":     goqu.Op{"like": "_%%:_%%#_%%"},
+			"subject":  goqu.Op{"like": "_%%:_%%#_%%"},
 		},
 	)
 
@@ -63,7 +63,7 @@ func (s *SQLStore) RowCount(ctx context.Context, query ac.RelationTupleQuery) (i
 	).Where(goqu.Ex{
 		"object":   query.Object.ID,
 		"relation": query.Relations,
-		"user":     query.Subject.String(),
+		"subject":  query.Subject.String(),
 	})
 
 	sql, args, err := sqlbuilder.ToSQL()
@@ -103,7 +103,7 @@ func (s *SQLStore) ListRelationTuples(ctx context.Context, query *aclpb.ListRela
 
 	if query.GetSubject() != nil {
 		sqlbuilder = sqlbuilder.Where(goqu.Ex{
-			"user": query.GetSubject().String(),
+			"subject": query.GetSubject().String(),
 		})
 	}
 
@@ -149,7 +149,7 @@ func (s *SQLStore) TransactRelationTuples(ctx context.Context, tupleInserts []*a
 	}
 
 	for _, tuple := range tupleInserts {
-		sqlbuilder := goqu.Dialect("postgres").Insert(tuple.Namespace).Cols("object", "relation", "user").Vals(
+		sqlbuilder := goqu.Dialect("postgres").Insert(tuple.Namespace).Cols("object", "relation", "subject").Vals(
 			goqu.Vals{tuple.Object, tuple.Relation, tuple.Subject.String()},
 		).OnConflict(goqu.DoNothing())
 
@@ -184,7 +184,7 @@ func (s *SQLStore) TransactRelationTuples(ctx context.Context, tupleInserts []*a
 		sqlbuilder := goqu.Dialect("postgres").Delete(tuple.Namespace).Where(goqu.Ex{
 			"object":   tuple.Object,
 			"relation": tuple.Relation,
-			"user":     tuple.Subject.String(),
+			"subject":  tuple.Subject.String(),
 		})
 
 		sql, args, err := sqlbuilder.ToSQL()

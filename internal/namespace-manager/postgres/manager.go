@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/doug-martin/goqu/v9"
@@ -79,6 +80,18 @@ func (m *sqlNamespaceManager) AddConfig(ctx context.Context, cfg *aclpb.Namespac
 	}
 
 	_, err = txn.Exec(sql2, args2...)
+	if err != nil {
+		return err
+	}
+
+	stmt := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
+		object text,
+		relation text,
+		subject text,
+		PRIMARY KEY (object, relation, subject)
+	)`, cfg.Name)
+
+	_, err = txn.Exec(stmt)
 	if err != nil {
 		return err
 	}
