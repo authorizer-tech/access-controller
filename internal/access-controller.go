@@ -151,7 +151,7 @@ func (a *AccessController) chooseNamespaceConfigSnapshot(namespace string) (*Nam
 		}
 
 		if len(commonTimestamps) < 1 {
-			return nil, fmt.Errorf("No common namespace config snapshot timestamp(s) were found.")
+			return nil, fmt.Errorf("No common namespace config snapshot timestamp(s) were found for namespace '%s'.", namespace)
 		}
 	} else {
 		// If this branch of logic occurs it's reasonble to panic because under normal operating
@@ -555,7 +555,7 @@ EVAL:
 	return a.checkRewrite(ctx, rewrite, namespace, object, relation, subject)
 }
 
-func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb.Rewrite, tree *Tree, namespace, object, relation string, depth uint) (*Tree, error) {
+func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb.Rewrite, tree *Tree, namespace, object, relation string, configSnapshot *NamespaceConfigSnapshot, depth uint) (*Tree, error) {
 
 	op := rewrite.GetRewriteOperation()
 
@@ -577,7 +577,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 				Subject: tree.Subject,
 			}
 
-			t, err := a.expandWithRewrite(ctx, rewrite, subTree, namespace, object, relation, depth)
+			t, err := a.expandWithRewrite(ctx, rewrite, subTree, namespace, object, relation, configSnapshot, depth)
 			if err != nil {
 				return nil, err
 			}
@@ -606,7 +606,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 						if rr == "..." {
 							rr = relation
 						}
-						t, err := a.expand(ctx, ss.Namespace, ss.Object, rr, depth)
+						t, err := a.expand(ctx, ss.Namespace, ss.Object, rr, configSnapshot, depth-1)
 						if err != nil {
 							return nil, err
 						}
@@ -620,7 +620,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 					}
 				}
 			case *aclpb.SetOperation_Child_ComputedSubjectset:
-				t, err := a.expand(ctx, namespace, object, so.ComputedSubjectset.GetRelation(), depth)
+				t, err := a.expand(ctx, namespace, object, so.ComputedSubjectset.GetRelation(), configSnapshot, depth-1)
 				if err != nil {
 					return nil, err
 				}
@@ -651,7 +651,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 						if rr == "..." {
 							rr = relation
 						}
-						t, err := a.expand(ctx, ss.Namespace, ss.Object, rr, depth)
+						t, err := a.expand(ctx, ss.Namespace, ss.Object, rr, configSnapshot, depth-1)
 						if err != nil {
 							return nil, err
 						}
@@ -671,11 +671,11 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 	return tree, nil
 }
 
-func (a *AccessController) expand(ctx context.Context, namespace, object, relation string, depth uint) (*Tree, error) {
+func (a *AccessController) expand(ctx context.Context, namespace, object, relation string, configSnapshot *NamespaceConfigSnapshot, depth uint) (*Tree, error) {
 
-	rewrite, err := a.NamespaceManager.GetRewrite(ctx, namespace, relation)
-	if err != nil {
-		return nil, err
+	rewrite := rewriteFromNamespaceConfig(relation, configSnapshot.Config)
+	if rewrite == nil {
+		return nil, fmt.Errorf("No relation '%s' was defined in namespace '%s' at snapshot config timestamp '%s'", relation, namespace, configSnapshot.Timestamp)
 	}
 
 	tree := &Tree{
@@ -685,7 +685,7 @@ func (a *AccessController) expand(ctx context.Context, namespace, object, relati
 			Relation:  relation,
 		},
 	}
-	return a.expandWithRewrite(ctx, rewrite, tree, namespace, object, relation, depth)
+	return a.expandWithRewrite(ctx, rewrite, tree, namespace, object, relation, configSnapshot, depth)
 }
 
 func (a *AccessController) Check(ctx context.Context, req *aclpb.CheckRequest) (*aclpb.CheckResponse, error) {
@@ -712,15 +712,45 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 		action := delta.GetAction()
 		rt := delta.GetRelationTuple()
 
+		namespace := rt.GetNamespace()
+		relation := rt.GetRelation()
+		subject := SubjectFromProto(rt.GetSubject())
+
 		irt := InternalRelationTuple{
-			Namespace: rt.GetNamespace(),
+			Namespace: namespace,
 			Object:    rt.GetObject(),
-			Relation:  rt.GetRelation(),
-			Subject:   SubjectFromProto(rt.GetSubject()),
+			Relation:  relation,
+			Subject:   subject,
 		}
 
 		switch action {
 		case aclpb.RelationTupleDelta_INSERT:
+			configSnapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
+			if err != nil {
+				return nil, err
+			}
+
+			rewrite := rewriteFromNamespaceConfig(relation, configSnapshot.Config)
+			if rewrite == nil {
+				return nil, fmt.Errorf("No relation '%s' was defined in namespace '%s' at snapshot config timestamp '%s'", relation, namespace, configSnapshot.Timestamp)
+			}
+
+			switch ref := rt.GetSubject().GetRef().(type) {
+			case *aclpb.Subject_Set:
+				n := ref.Set.GetNamespace()
+				r := ref.Set.GetRelation()
+
+				configSnapshot, err := a.chooseNamespaceConfigSnapshot(n)
+				if err != nil {
+					return nil, fmt.Errorf("SubjectSet '%s' references the '%s' namespace which is undefined at this time. If this namespace was recently added, please try again in a couple minutes.", subject.String(), n)
+				}
+
+				rewrite := rewriteFromNamespaceConfig(r, configSnapshot.Config)
+				if rewrite == nil {
+					return nil, fmt.Errorf("SubjectSet '%s' references relation '%s' which is undefined in the namespace '%s' at snapshot config timestamp '%s'. If this relation was recently added to the config, please try again in a couple minutes.", subject.String(), r, n, configSnapshot.Timestamp)
+				}
+			}
+
 			inserts = append(inserts, &irt)
 		case aclpb.RelationTupleDelta_DELETE:
 			deletes = append(deletes, &irt)
@@ -760,7 +790,12 @@ func (a *AccessController) Expand(ctx context.Context, req *aclpb.ExpandRequest)
 	object := subject.GetObject()
 	relation := subject.GetRelation()
 
-	tree, err := a.expand(ctx, namespace, object, relation, 100)
+	configSnapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	tree, err := a.expand(ctx, namespace, object, relation, configSnapshot, 12)
 	if err != nil {
 		return nil, err
 	}
