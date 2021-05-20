@@ -154,10 +154,7 @@ func (a *AccessController) chooseNamespaceConfigSnapshot(namespace string) (*Nam
 			return nil, fmt.Errorf("No common namespace config snapshot timestamp(s) were found for namespace '%s'.", namespace)
 		}
 	} else {
-		// If this branch of logic occurs it's reasonble to panic because under normal operating
-		// conditions this should never occur. If it does occur it indicates something seriously
-		// wrong in the logic leading up to this path.
-		panic("Underlying system invariants were not met! No namespace config snapshots were found for any peer (local included).")
+		return nil, ErrNoLocalNamespacesDefined
 	}
 
 	var selectedTS time.Time
@@ -295,8 +292,8 @@ func (a *AccessController) checkLeaf(ctx context.Context, op *aclpb.SetOperation
 			return true, nil
 		}
 
-		// compute indirect ACLs referenced by usersets from the tuples
-		// SELECT * FROM namespace WHERE relation=<rewrite.relation> AND user LIKE '_%%:_%%#_%%'
+		// compute indirect ACLs referenced by subject sets from the tuples
+		// SELECT * FROM namespace WHERE relation=<rewrite.relation> AND subject LIKE '_%%:_%%#_%%'
 		subjects, _ := a.RelationTupleStore.SubjectSets(ctx, obj, relation)
 		// todo: capture error
 
@@ -461,6 +458,9 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 	if !ok {
 		snapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
 		if err != nil {
+			if err == ErrNoLocalNamespacesDefined {
+				return false, fmt.Errorf("No namespace configs have been added yet. Please add a namespace config and then proceed. If you recently added one, it may take a couple minutes to propagate")
+			}
 			return false, err
 		}
 
@@ -675,7 +675,7 @@ func (a *AccessController) expand(ctx context.Context, namespace, object, relati
 
 	rewrite := rewriteFromNamespaceConfig(relation, configSnapshot.Config)
 	if rewrite == nil {
-		return nil, fmt.Errorf("No relation '%s' was defined in namespace '%s' at snapshot config timestamp '%s'", relation, namespace, configSnapshot.Timestamp)
+		return nil, fmt.Errorf("Relation '%s' is undefined in namespace '%s' at snapshot config timestamp '%s'", relation, namespace, configSnapshot.Timestamp)
 	}
 
 	tree := &Tree{
@@ -716,6 +716,15 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 		relation := rt.GetRelation()
 		subject := SubjectFromProto(rt.GetSubject())
 
+		configSnapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
+		if err != nil {
+			if err == ErrNoLocalNamespacesDefined {
+				return nil, fmt.Errorf("No namespace configs have been added yet. Please add a namespace config and then proceed. If you recently added one, it may take a couple minutes to propagate")
+			}
+
+			return nil, fmt.Errorf("'%s' namespace is undefined at this time. If this namespace was recently added, please try again in a couple of minutes.", namespace)
+		}
+
 		irt := InternalRelationTuple{
 			Namespace: namespace,
 			Object:    rt.GetObject(),
@@ -725,14 +734,10 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 
 		switch action {
 		case aclpb.RelationTupleDelta_INSERT:
-			configSnapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
-			if err != nil {
-				return nil, err
-			}
 
 			rewrite := rewriteFromNamespaceConfig(relation, configSnapshot.Config)
 			if rewrite == nil {
-				return nil, fmt.Errorf("No relation '%s' was defined in namespace '%s' at snapshot config timestamp '%s'", relation, namespace, configSnapshot.Timestamp)
+				return nil, fmt.Errorf("Relation '%s' is undefined in namespace '%s' at snapshot config timestamp '%s'", relation, namespace, configSnapshot.Timestamp)
 			}
 
 			switch ref := rt.GetSubject().GetRef().(type) {
@@ -792,6 +797,10 @@ func (a *AccessController) Expand(ctx context.Context, req *aclpb.ExpandRequest)
 
 	configSnapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
 	if err != nil {
+		if err == ErrNoLocalNamespacesDefined {
+			return nil, fmt.Errorf("No namespace configs have been added yet. Please add a namespace config and then proceed. If you recently added one, it may take a couple minutes to propagate")
+		}
+
 		return nil, err
 	}
 

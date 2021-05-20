@@ -11,6 +11,7 @@ import (
 
 var ErrNamespaceAlreadyExists error = errors.New("The provided namespace already exists.")
 var ErrNamespaceDoesntExist error = errors.New("The provided namespace doesn't exist, please add it first.")
+var ErrNoLocalNamespacesDefined error = errors.New("No local namespace configs have been defined at this time.")
 
 var nsConfigSnapshotTimestampKey ctxKey
 
