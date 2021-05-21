@@ -1,0 +1,63 @@
+name: review
+
+on: [pull_request]
+
+jobs:
+  job1:
+    name: "Go: Vet, Lint, & Test"
+    strategy:
+      matrix:
+        go: [1.16]
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v1
+        with:
+          path: src/github.com/authorizer-tech/access-controller
+      
+      - name: Setup Go
+        uses: actions/setup-go@v1
+        with:
+          go-version: ${{matrix.go}}
+      
+      - name: Setup GOPATH
+        run: |
+          echo $(go env GOPATH)/bin >> $GITHUB_PATH
+
+      - name: Install Tools
+        run: |
+          cat tools.go | grep _ | awk -F'"' '{print $2}' | xargs -tI % go install %
+
+      - name: "Go: Vet and Lint"
+        run: |
+          go vet ./...
+          golint -set_exit_status ./...
+
+      - name: "Go: Test"
+        run: |
+          go test ./...
+      
+  job2:
+    name: "Buf: Lint & Breaking Changes"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v1
+        with:
+          path: src/github.com/authorizer-tech/access-controller
+
+      - name: Install Buf
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/bin
+          curl -sSL "https://github.com/bufbuild/buf/releases/download/v0.41.0/buf-$(uname -s)-$(uname -m)" -o $GITHUB_WORKSPACE/bin/buf
+          chmod +x $GITHUB_WORKSPACE/bin/buf
+          echo "$GITHUB_WORKSPACE/bin" >> $GITHUB_PATH
+
+      - name: "buf lint"
+        run: |
+          buf lint
+
+      - name: "buf breaking"
+        run: |
+          buf breaking --against "https://github.com/authorizer-tech/access-controller.git#branch=master"
