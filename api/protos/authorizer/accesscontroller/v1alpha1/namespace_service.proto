@@ -2,10 +2,10 @@ syntax = "proto3";
 
 package authorizer.accesscontroller.v1alpha1;
 
-import "authorizer-tech/accesscontroller/v1alpha1/acl.proto";
+import "authorizer/accesscontroller/v1alpha1/acl.proto";
 import "google/api/annotations.proto";
 
-option go_package = "github.com/authorizer-tech/access-controller/api/protos/authorizer-tech/accesscontroller/v1alpha1;acl";
+option go_package = "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1;acl";
 
 // The service to administer namespace configurations.
 service NamespaceConfigService {
@@ -91,7 +91,7 @@ message SetOperation {
         message This {}
 
         oneof child_type {
-            This _this = 1;
+            This this = 1;
             ComputedSubjectset computed_subjectset = 2;
             TupleToSubjectset tuple_to_subjectset = 3;
             Rewrite rewrite = 4;

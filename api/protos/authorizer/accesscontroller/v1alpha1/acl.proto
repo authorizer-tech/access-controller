@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package authorizer.accesscontroller.v1alpha1;
 
-option go_package = "github.com/authorizer-tech/access-controller/api/protos/authorizer-tech/accesscontroller/v1alpha1;acl";
+option go_package = "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1;acl";
 
 // RelationTuple relates an Object with a Subject.
 //

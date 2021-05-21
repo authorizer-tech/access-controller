@@ -1,7 +1,7 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "authorizer-tech/accesscontroller/v1alpha1/namespace_service.proto",
+    "title": "authorizer/accesscontroller/v1alpha1/namespace_service.proto",
     "version": "version not set"
   },
   "tags": [
@@ -137,7 +137,7 @@
     "SetOperationChild": {
       "type": "object",
       "properties": {
-        "This": {
+        "this": {
           "$ref": "#/definitions/ChildThis"
         },
         "computedSubjectset": {

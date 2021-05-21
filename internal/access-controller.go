@@ -12,7 +12,7 @@ import (
 	"github.com/buraksezer/consistent"
 	"github.com/hashicorp/memberlist"
 
-	aclpb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
+	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -273,7 +273,7 @@ func NewAccessController(opts ...AccessControllerOption) (*AccessController, err
 func (a *AccessController) checkLeaf(ctx context.Context, op *aclpb.SetOperation_Child, namespace, object, relation, user string) (bool, error) {
 
 	switch rewrite := op.GetChildType().(type) {
-	case *aclpb.SetOperation_Child_XThis:
+	case *aclpb.SetOperation_Child_This_:
 		obj := Object{
 			Namespace: namespace,
 			ID:        object,
@@ -587,7 +587,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 
 			// otherwise we're dealing with _this, computed_userset, or tuple_to_userset
 			switch so := child.GetChildType().(type) {
-			case *aclpb.SetOperation_Child_XThis:
+			case *aclpb.SetOperation_Child_This_:
 				tuples, err := a.RelationTupleStore.ListRelationTuples(ctx, &aclpb.ListRelationTuplesRequest_Query{
 					Namespace: namespace,
 					Object:    object,
@@ -733,7 +733,7 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 		}
 
 		switch action {
-		case aclpb.RelationTupleDelta_INSERT:
+		case aclpb.RelationTupleDelta_ACTION_INSERT:
 
 			rewrite := rewriteFromNamespaceConfig(relation, configSnapshot.Config)
 			if rewrite == nil {
@@ -757,7 +757,7 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 			}
 
 			inserts = append(inserts, &irt)
-		case aclpb.RelationTupleDelta_DELETE:
+		case aclpb.RelationTupleDelta_ACTION_DELETE:
 			deletes = append(deletes, &irt)
 		}
 	}
@@ -967,7 +967,7 @@ func rewriteFromNamespaceConfig(relation string, config *aclpb.NamespaceConfig) 
 					RewriteOperation: &aclpb.Rewrite_Union{
 						Union: &aclpb.SetOperation{
 							Children: []*aclpb.SetOperation_Child{
-								{ChildType: &aclpb.SetOperation_Child_XThis{}},
+								{ChildType: &aclpb.SetOperation_Child_This_{}},
 							},
 						},
 					},

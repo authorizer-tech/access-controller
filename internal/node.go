@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	aclpb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
+	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
 	"github.com/hashicorp/memberlist"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"

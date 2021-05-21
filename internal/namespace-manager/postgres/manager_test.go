@@ -9,7 +9,7 @@ import (
 
 	"database/sql"
 
-	aclpb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
+	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
 	ac "github.com/authorizer-tech/access-controller/internal"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
@@ -205,7 +205,7 @@ func TestGetRewrite(t *testing.T) {
 		RewriteOperation: &aclpb.Rewrite_Union{
 			Union: &aclpb.SetOperation{
 				Children: []*aclpb.SetOperation_Child{
-					{ChildType: &aclpb.SetOperation_Child_XThis{}},
+					{ChildType: &aclpb.SetOperation_Child_This_{}},
 				},
 			},
 		},

@@ -1,16 +1,16 @@
 version: v1beta1
 plugins:
   - name: go
-    out: gen/go
+    out: .
     opt:
-      - paths=source_relative
+      - module=github.com/authorizer-tech/access-controller
   - name: go-grpc
-    out: gen/go
+    out: .
     opt:
-      - paths=source_relative
+      - module=github.com/authorizer-tech/access-controller
   - name: grpc-gateway
-    out: gen/go
+    out: .
     opt:
-      - paths=source_relative
+      - module=github.com/authorizer-tech/access-controller
   - name: openapiv2
     out: api/openapiv2
