@@ -6,3 +6,5 @@ build:
 deps:
   - buf.build/beta/googleapis
   - buf.build/grpc-ecosystem/grpc-gateway
+breaking:
+  ignore_unstable_packages: true
