@@ -114,13 +114,7 @@
             "in": "body",
             "required": true,
             "schema": {
-              "type": "object",
-              "properties": {
-                "relation": {
-                  "$ref": "#/definitions/v1alpha1Relation"
-                }
-              },
-              "description": "The request for a NamespaceConfigService.WriteRelation rpc."
+              "$ref": "#/definitions/v1alpha1WriteRelationRequest"
             }
           }
         ],
@@ -287,6 +281,18 @@
           "$ref": "#/definitions/v1alpha1ComputedSubjectset"
         }
       }
+    },
+    "v1alpha1WriteRelationRequest": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string"
+        },
+        "relation": {
+          "$ref": "#/definitions/v1alpha1Relation"
+        }
+      },
+      "description": "The request for a NamespaceConfigService.WriteRelation rpc."
     },
     "v1alpha1WriteRelationResponse": {
       "type": "object",

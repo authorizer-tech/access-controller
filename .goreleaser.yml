@@ -2,7 +2,8 @@ project_name: access-controller
 
 before:
   hooks:
-    - go mod download
+    - make install-tools
+    - buf generate
 builds:
   - main: ./cmd/access-controller/main.go
     binary: bin/access-controller
