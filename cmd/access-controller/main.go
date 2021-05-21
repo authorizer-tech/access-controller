@@ -18,7 +18,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/spf13/viper"
 
-	aclpb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
+	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
 	ac "github.com/authorizer-tech/access-controller/internal"
 	"github.com/authorizer-tech/access-controller/internal/datastores"
 	"github.com/authorizer-tech/access-controller/internal/namespace-manager/postgres"

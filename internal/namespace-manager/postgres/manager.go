@@ -9,7 +9,7 @@ import (
 	"github.com/doug-martin/goqu/v9"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	aclpb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
+	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
 	ac "github.com/authorizer-tech/access-controller/internal"
 )
 
@@ -224,7 +224,7 @@ func (m *sqlNamespaceManager) GetRewrite(ctx context.Context, namespace, relatio
 					RewriteOperation: &aclpb.Rewrite_Union{
 						Union: &aclpb.SetOperation{
 							Children: []*aclpb.SetOperation_Child{
-								{ChildType: &aclpb.SetOperation_Child_XThis{}},
+								{ChildType: &aclpb.SetOperation_Child_This_{}},
 							},
 						},
 					},

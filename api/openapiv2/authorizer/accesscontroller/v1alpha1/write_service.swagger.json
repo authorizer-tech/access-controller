@@ -1,7 +1,7 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "authorizer-tech/accesscontroller/v1alpha1/write_service.proto",
+    "title": "authorizer/accesscontroller/v1alpha1/write_service.proto",
     "version": "version not set"
   },
   "tags": [
@@ -55,11 +55,11 @@
       "type": "string",
       "enum": [
         "ACTION_UNSPECIFIED",
-        "INSERT",
-        "DELETE"
+        "ACTION_INSERT",
+        "ACTION_DELETE"
       ],
       "default": "ACTION_UNSPECIFIED",
-      "description": " - ACTION_UNSPECIFIED: Unspecified.\nThe `WriteRelationTuplesTxn` rpc ignores this\nRelationTupleDelta if an action was unspecified.\n - INSERT: Insertion of a new RelationTuple.\nIt is ignored if already existing.\n - DELETE: Deletion of the RelationTuple.\nIt is ignored if it does not exist."
+      "description": " - ACTION_UNSPECIFIED: Unspecified.\nThe `WriteRelationTuplesTxn` rpc ignores this\nRelationTupleDelta if an action was unspecified.\n - ACTION_INSERT: Insertion of a new RelationTuple.\nIt is ignored if already existing.\n - ACTION_DELETE: Deletion of the RelationTuple.\nIt is ignored if it does not exist."
     },
     "protobufAny": {
       "type": "object",

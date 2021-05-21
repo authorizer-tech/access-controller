@@ -2,10 +2,10 @@ syntax = "proto3";
 
 package authorizer.accesscontroller.v1alpha1;
 
-import "authorizer-tech/accesscontroller/v1alpha1/acl.proto";
+import "authorizer/accesscontroller/v1alpha1/acl.proto";
 import "google/api/annotations.proto";
 
-option go_package = "github.com/authorizer-tech/access-controller/api/protos/authorizer-tech/accesscontroller/v1alpha1;acl";
+option go_package = "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1;acl";
 
 // The write service to create and delete Access Control Lists.
 service WriteService {
@@ -42,11 +42,11 @@ message RelationTupleDelta {
 
     // Insertion of a new RelationTuple.
     // It is ignored if already existing.
-    INSERT = 1;
+    ACTION_INSERT = 1;
 
     // Deletion of the RelationTuple.
     // It is ignored if it does not exist.
-    DELETE = 4;
+    ACTION_DELETE = 4;
   }
 
   // The action to do on the RelationTuple.

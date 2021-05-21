@@ -8,7 +8,7 @@ import (
 	_ "github.com/doug-martin/goqu/v9/dialect/postgres"
 	_ "github.com/lib/pq"
 
-	aclpb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
+	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
 	ac "github.com/authorizer-tech/access-controller/internal"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )

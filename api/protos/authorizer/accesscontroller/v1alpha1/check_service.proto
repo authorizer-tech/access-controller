@@ -2,10 +2,10 @@ syntax = "proto3";
 
 package authorizer.accesscontroller.v1alpha1;
 
-import "authorizer-tech/accesscontroller/v1alpha1/acl.proto";
+import "authorizer/accesscontroller/v1alpha1/acl.proto";
 import "google/api/annotations.proto";
 
-option go_package = "github.com/authorizer-tech/access-controller/api/protos/authorizer-tech/accesscontroller/v1alpha1;acl";
+option go_package = "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1;acl";
 
 // The service that performs authorization checks
 // based on the stored Access Control Lists.
@@ -29,7 +29,7 @@ message CheckRequest {
   // evaluates a RelationTuple specifying a SubjectSet as
   // subject or due to a rewrite rule in a namespace config
   // this check request may involve other namespaces automatically.
-  string namespace = 1;
+  string namespace = 5;
 
   // The related object in this check.
   string object = 2;

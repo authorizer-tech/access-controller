@@ -15,6 +15,8 @@ require (
 	github.com/ory/dockertest/v3 v3.6.5
 	github.com/sirupsen/logrus v1.7.0
 	github.com/spf13/viper v1.7.1
+	golang.org/x/lint v0.0.0-20210508222113-6edffad5e616
+	golang.org/x/tools v0.1.1 // indirect
 	google.golang.org/genproto v0.0.0-20210224155714-063164c882e6
 	google.golang.org/grpc v1.36.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0

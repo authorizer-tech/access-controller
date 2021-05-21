@@ -1,7 +1,7 @@
 package accesscontroller
 
 import (
-	aclpb "github.com/authorizer-tech/access-controller/gen/go/authorizer-tech/accesscontroller/v1alpha1"
+	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
 )
 
 type NodeType string
