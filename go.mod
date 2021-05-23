@@ -14,6 +14,7 @@ require (
 	github.com/kr/pretty v0.2.0 // indirect
 	github.com/lib/pq v1.10.2
 	github.com/ory/dockertest/v3 v3.6.5
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sirupsen/logrus v1.7.0
 	github.com/spf13/viper v1.7.1
 	golang.org/x/lint v0.0.0-20210508222113-6edffad5e616

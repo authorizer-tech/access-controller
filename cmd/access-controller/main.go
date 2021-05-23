@@ -39,11 +39,9 @@ var advertise = flag.String("advertise", "", "The address that this node adverti
 var grpcPort = flag.Int("grpc-port", 50052, "The bind port for the grpc server")
 var httpPort = flag.Int("http-port", 8082, "The bind port for the grpc-gateway http server")
 var join = flag.String("join", "", "A comma-separated list of 'host:port' addresses for nodes in the cluster to join to")
-var insecure = flag.Bool("insecure", false, "Run in insecure mode (no tls)")
-var namespaceConfigPath = flag.String("namespace-config", "./testdata/namespace-configs", "The path to the namespace configurations")
 var configPath = flag.String("config", "./localconfig/config.yaml", "The path to the server config")
 
-type Config struct {
+type config struct {
 	GrpcGateway struct {
 		Enabled bool
 	}
@@ -66,7 +64,7 @@ func main() {
 		log.Fatalf("Failed to load server config file: %v", err)
 	}
 
-	var cfg Config
+	var cfg config
 	if err := viper.Unmarshal(&cfg); err != nil {
 		log.Fatalf("Failed to Unmarshal server config: %v", err)
 	}
@@ -84,6 +82,9 @@ func main() {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		log.Fatalf("Failed to establish a connection to Postgres database: %v", err)
+	}
+	if err := db.Ping(); err != nil {
+		log.Fatalf("Failed to connect to the database: %v", err)
 	}
 
 	datastore := &datastores.SQLStore{

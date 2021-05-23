@@ -274,9 +274,9 @@ func (i *iterator) Next() bool {
 // errors are returned immediately.
 func (i *iterator) Value() (*ac.NamespaceChangelogEntry, error) {
 
-	var namespace, operation, configJson string
+	var namespace, operation, configJSON string
 	var timestamp time.Time
-	if err := i.rows.Scan(&namespace, &operation, &configJson, &timestamp); err != nil {
+	if err := i.rows.Scan(&namespace, &operation, &configJSON, &timestamp); err != nil {
 		return nil, err
 	}
 
@@ -291,7 +291,7 @@ func (i *iterator) Value() (*ac.NamespaceChangelogEntry, error) {
 	}
 
 	var cfg aclpb.NamespaceConfig
-	if err := protojson.Unmarshal([]byte(configJson), &cfg); err != nil {
+	if err := protojson.Unmarshal([]byte(configJSON), &cfg); err != nil {
 		return nil, err
 	}
 

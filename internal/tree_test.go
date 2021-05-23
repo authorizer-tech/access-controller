@@ -10,21 +10,21 @@ import (
 func TestTree_ToProto(t *testing.T) {
 
 	tests := []struct {
-		input  *Tree
+		input  *SubjectTree
 		output *aclpb.SubjectTree
 	}{
 		{
 			output: nil,
 		},
 		{
-			input: &Tree{
+			input: &SubjectTree{
 				Type: UnionNode,
 				Subject: &SubjectSet{
 					Namespace: "groups",
 					Object:    "group1",
 					Relation:  "member",
 				},
-				Children: []*Tree{
+				Children: []*SubjectTree{
 					{
 						Type:    LeafNode,
 						Subject: &SubjectID{"user1"},

@@ -63,7 +63,7 @@ func TestMain(m *testing.M) {
 		log.Fatalf("Failed to start docker container: %s", err.Error())
 	}
 
-	dsn := fmt.Sprintf("postgres://%s:%s@localhost:%s/%s?sslmode=disable", username, password, port, database)
+	dsn := fmt.Sprintf("%s://%s:%s@localhost:%s/%s?sslmode=disable", dialect, username, password, port, database)
 	if err = dockerPool.Retry(func() error {
 		db, err = sql.Open("postgres", dsn)
 		if err != nil {

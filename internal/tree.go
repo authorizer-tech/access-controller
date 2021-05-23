@@ -4,14 +4,22 @@ import (
 	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
 )
 
+// NodeType represents a specific type of node within a SubjectTree structure.
 type NodeType string
 
 const (
-	UnionNode        NodeType = "union"
+
+	// UnionNode represents a SubjectTree node that joins it's children via a union.
+	UnionNode NodeType = "union"
+
+	// IntersectionNode represents a SubjectTree node that joins it's children via an intersection.
 	IntersectionNode NodeType = "intersection"
-	LeafNode         NodeType = "leaf"
+
+	// LeafNode represents a SubjectTree node with no children.
+	LeafNode NodeType = "leaf"
 )
 
+// ToProto returns the protobuf representation of the NodeType.
 func (t NodeType) ToProto() aclpb.NodeType {
 	switch t {
 	case LeafNode:
@@ -24,14 +32,16 @@ func (t NodeType) ToProto() aclpb.NodeType {
 	return aclpb.NodeType_NODE_TYPE_UNSPECIFIED
 }
 
-type Tree struct {
+// SubjectTree represents a tree datastructure that stores relationships between Subjects.
+type SubjectTree struct {
 	Type NodeType `json:"type"`
 
-	Subject  Subject `json:"subject"`
-	Children []*Tree `json:"children,omitempty"`
+	Subject  Subject        `json:"subject"`
+	Children []*SubjectTree `json:"children,omitempty"`
 }
 
-func (t *Tree) ToProto() *aclpb.SubjectTree {
+// ToProto returns the protobuf representation of the SubjectTree.
+func (t *SubjectTree) ToProto() *aclpb.SubjectTree {
 	if t == nil {
 		return nil
 	}

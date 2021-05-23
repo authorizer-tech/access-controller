@@ -8,7 +8,9 @@ import (
 	pb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
 )
 
-var ErrInvalidSubjectSetString = fmt.Errorf("The provided SubjectSet string is malformed.")
+// ErrInvalidSubjectSetString is an error that is returned if a malformed SubjectSet string
+// is encountered.
+var ErrInvalidSubjectSetString = fmt.Errorf("the provided SubjectSet string is malformed")
 
 // Object represents a namespace and object id.
 type Object struct {
@@ -25,14 +27,19 @@ type Subject interface {
 	ToProto() *pb.Subject
 }
 
+// SubjectID is a unique identifier of some subject.
 type SubjectID struct {
 	ID string `json:"id"`
 }
 
+// MarshalJSON returns the SubjectID as a json byte slice.
 func (s SubjectID) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + s.String() + `"`), nil
 }
 
+// Equals returns a bool indicating if the provided interface and
+// the SubjectID are equivalent. Two SubjectIDs are equivalent
+// if they have the same ID.
 func (s *SubjectID) Equals(v interface{}) bool {
 	uv, ok := v.(*SubjectID)
 	if !ok {
@@ -41,15 +48,18 @@ func (s *SubjectID) Equals(v interface{}) bool {
 	return uv.ID == s.ID
 }
 
+// FromString parses str and returns the Subject (SubjectID specifically).
 func (s *SubjectID) FromString(str string) (Subject, error) {
 	s.ID = str
 	return s, nil
 }
 
+// String returns the string representation of the SubjectID.
 func (s *SubjectID) String() string {
 	return s.ID
 }
 
+// ToProto returns the protobuf Subject representation of the given SubjectID.
 func (s *SubjectID) ToProto() *pb.Subject {
 
 	if s == nil {
@@ -63,12 +73,17 @@ func (s *SubjectID) ToProto() *pb.Subject {
 	}
 }
 
+// SubjectSet defines the set of all subjects that have a specific relation to an object
+// within some namespace.
 type SubjectSet struct {
 	Namespace string `json:"namespace"`
 	Object    string `json:"object"`
 	Relation  string `json:"relation"`
 }
 
+// Equals returns a bool indicating if the provided interface and
+// the SubjectSet are equivalent. Two SubjectSets are equivalent
+// if they define the same (namespace, object, relation) tuple.
 func (s *SubjectSet) Equals(v interface{}) bool {
 	uv, ok := v.(*SubjectSet)
 	if !ok {
@@ -77,14 +92,17 @@ func (s *SubjectSet) Equals(v interface{}) bool {
 	return uv.Relation == s.Relation && uv.Object == s.Object && uv.Namespace == s.Namespace
 }
 
+// String returns the string representation of the SubjectSet.
 func (s *SubjectSet) String() string {
 	return fmt.Sprintf("%s:%s#%s", s.Namespace, s.Object, s.Relation)
 }
 
+// MarshalJSON returns the SubjectSet as a json byte slice.
 func (s SubjectSet) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + s.String() + `"`), nil
 }
 
+// ToProto returns the protobuf Subject representation of the given SubjectSet.
 func (s *SubjectSet) ToProto() *pb.Subject {
 	if s == nil {
 		return nil

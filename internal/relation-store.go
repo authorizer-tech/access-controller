@@ -7,6 +7,7 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
+// RelationTupleStore defines an interface to manage the storage of relation tuples.
 type RelationTupleStore interface {
 	SubjectSets(ctx context.Context, object Object, relations ...string) ([]SubjectSet, error)
 	ListRelationTuples(ctx context.Context, query *aclpb.ListRelationTuplesRequest_Query, mask *fieldmaskpb.FieldMask) ([]InternalRelationTuple, error)

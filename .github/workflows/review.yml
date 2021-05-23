@@ -4,25 +4,23 @@ on: [pull_request]
 
 jobs:
   job1:
-    name: "Go: Vet, Lint, & Test"
-    strategy:
-      matrix:
-        go: [1.16]
-
+    name: "Go: Vet, Check, & Test"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v1
         with:
-            go-version: ${{matrix.go}}
-      - run: echo $(go env GOPATH)/bin >> $GITHUB_PATH
+          go-version: 1.16
       - run: make install-tools
+      - run: echo $(go env GOPATH)/bin >> $GITHUB_PATH
       - run: buf generate
 
-      - name: "Go: Vet and Lint"
+      - name: "Go: Vet and Check"
         run: |
           go vet ./...
-          golint -set_exit_status ./...
+          staticcheck ./...
 
       - name: "Go: Test Coverage"
         run: |

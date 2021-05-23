@@ -11,6 +11,7 @@ import (
 
 	"github.com/buraksezer/consistent"
 	"github.com/hashicorp/memberlist"
+	"github.com/pkg/errors"
 
 	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
 	log "github.com/sirupsen/logrus"
@@ -75,7 +76,10 @@ func (a *AccessController) watchNamespaceConfigs(ctx context.Context) {
 		// production.
 		iter, err := a.NamespaceManager.TopChanges(context.TODO(), 3)
 		if err != nil {
-			// todo: handle error
+			// todo: handle this more gracefully.. we'll slam the database continuously right
+			// now if we experience errors back to back in a short interval of time.
+			log.Errorf("Failed to list top namespace config changes: %v", err)
+			continue
 		}
 
 		for iter.Next() {
@@ -92,14 +96,14 @@ func (a *AccessController) watchNamespaceConfigs(ctx context.Context) {
 			case AddNamespace, UpdateNamespace:
 				err := peerNamespaceConfigs.SetNamespaceConfigSnapshot(a.ServerID, namespace, config, timestamp)
 				if err != nil {
-					// todo: handle error
+					log.Errorf("Failed to set the namespace config snapshot for this node: %v", err)
 				}
 			default:
 				panic("An expected namespace operation was encountered")
 			}
 		}
 		if err := iter.Close(ctx); err != nil {
-			// todo: handle error
+			log.Errorf("Failed to close the namespace config iterator: %v", err)
 		}
 
 		time.Sleep(2 * time.Second)
@@ -151,7 +155,7 @@ func (a *AccessController) chooseNamespaceConfigSnapshot(namespace string) (*Nam
 		}
 
 		if len(commonTimestamps) < 1 {
-			return nil, fmt.Errorf("No common namespace config snapshot timestamp(s) were found for namespace '%s'.", namespace)
+			return nil, fmt.Errorf("no common namespace config snapshot timestamp(s) were found for namespace '%s'", namespace)
 		}
 	} else {
 		return nil, ErrNoLocalNamespacesDefined
@@ -186,7 +190,7 @@ func NewAccessController(opts ...AccessControllerOption) (*AccessController, err
 	// Pre-load 3 most recent namespace config changes into the namespace config snapshot store.
 	iter, err := ac.NamespaceManager.TopChanges(context.Background(), 3)
 	if err != nil {
-		return nil, err
+		return nil, errors.WithMessage(err, "Failed to list top namespace changelog changes.")
 	}
 
 	for iter.Next() {
@@ -222,7 +226,7 @@ func NewAccessController(opts ...AccessControllerOption) (*AccessController, err
 
 	node := &Node{
 		ID:        ac.ServerID,
-		RpcRouter: NewMapClientRouter(),
+		RPCRouter: NewMapClientRouter(),
 		Hashring: &ConsistentHashring{
 			Ring: ring,
 		},
@@ -459,7 +463,7 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 		snapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
 		if err != nil {
 			if err == ErrNoLocalNamespacesDefined {
-				return false, fmt.Errorf("No namespace configs have been added yet. Please add a namespace config and then proceed. If you recently added one, it may take a couple minutes to propagate")
+				return false, fmt.Errorf("no namespace configs have been added yet. Please add a namespace config and then proceed. If you recently added one, it may take a couple minutes to propagate")
 			}
 			return false, err
 		}
@@ -474,14 +478,16 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 
 		log.Tracef("Proxying Check RPC request to node '%v'..", forwardingNodeID)
 
-		c, err := a.RpcRouter.GetClient(forwardingNodeID)
+		c, err := a.RPCRouter.GetClient(forwardingNodeID)
 		if err != nil {
-			// todo: handle error better
+			return false, fmt.Errorf("failed to acquire the RPC client for the peer with ID '%s'", forwardingNodeID)
 		}
 
 		client, ok := c.(aclpb.CheckServiceClient)
 		if !ok {
-			// todo: handle error better
+			// todo: is panic'ing the right approach here? The value should
+			// always be a CheckServiceClient, and if not there's a bug.
+			panic("unexpected RPC client type encountered")
 		}
 
 		modifiedCtx := context.WithValue(ctx, hashringChecksumKey, a.Hashring.Checksum())
@@ -513,14 +519,16 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 
 			log.Tracef("Proxying Check RPC request to node '%v'..", forwardingNodeID)
 
-			c, err = a.RpcRouter.GetClient(forwardingNodeID)
+			c, err = a.RPCRouter.GetClient(forwardingNodeID)
 			if err != nil {
 				continue
 			}
 
 			client, ok := c.(aclpb.CheckServiceClient)
 			if !ok {
-				// todo: handle error better
+				// todo: is panic'ing the right approach here? The value should
+				// always be a CheckServiceClient, and if not there's a bug.
+				panic("unexpected RPC client type encountered")
 			}
 
 			modifiedCtx := context.WithValue(ctx, hashringChecksumKey, a.Hashring.Checksum())
@@ -555,7 +563,7 @@ EVAL:
 	return a.checkRewrite(ctx, rewrite, namespace, object, relation, subject)
 }
 
-func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb.Rewrite, tree *Tree, namespace, object, relation string, configSnapshot *NamespaceConfigSnapshot, depth uint) (*Tree, error) {
+func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb.Rewrite, tree *SubjectTree, namespace, object, relation string, configSnapshot *NamespaceConfigSnapshot, depth uint) (*SubjectTree, error) {
 
 	op := rewrite.GetRewriteOperation()
 
@@ -573,7 +581,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 
 		rewrite := child.GetRewrite()
 		if rewrite != nil {
-			subTree := &Tree{
+			subTree := &SubjectTree{
 				Subject: tree.Subject,
 			}
 
@@ -613,7 +621,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 
 						tree.Children = append(tree.Children, t)
 					} else {
-						tree.Children = append(tree.Children, &Tree{
+						tree.Children = append(tree.Children, &SubjectTree{
 							Type:    LeafNode,
 							Subject: subject,
 						})
@@ -658,7 +666,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 
 						tree.Children = append(tree.Children, t)
 					} else {
-						tree.Children = append(tree.Children, &Tree{
+						tree.Children = append(tree.Children, &SubjectTree{
 							Type:    LeafNode,
 							Subject: subject,
 						})
@@ -671,14 +679,14 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 	return tree, nil
 }
 
-func (a *AccessController) expand(ctx context.Context, namespace, object, relation string, configSnapshot *NamespaceConfigSnapshot, depth uint) (*Tree, error) {
+func (a *AccessController) expand(ctx context.Context, namespace, object, relation string, configSnapshot *NamespaceConfigSnapshot, depth uint) (*SubjectTree, error) {
 
 	rewrite := rewriteFromNamespaceConfig(relation, configSnapshot.Config)
 	if rewrite == nil {
-		return nil, fmt.Errorf("Relation '%s' is undefined in namespace '%s' at snapshot config timestamp '%s'", relation, namespace, configSnapshot.Timestamp)
+		return nil, fmt.Errorf("relation '%s' is undefined in namespace '%s' at snapshot config timestamp '%s'", relation, namespace, configSnapshot.Timestamp)
 	}
 
-	tree := &Tree{
+	tree := &SubjectTree{
 		Subject: &SubjectSet{
 			Namespace: namespace,
 			Object:    object,
@@ -688,6 +696,7 @@ func (a *AccessController) expand(ctx context.Context, namespace, object, relati
 	return a.expandWithRewrite(ctx, rewrite, tree, namespace, object, relation, configSnapshot, depth)
 }
 
+// Check checks if a Subject has a relation to an object within a namespace.
 func (a *AccessController) Check(ctx context.Context, req *aclpb.CheckRequest) (*aclpb.CheckResponse, error) {
 	subject := SubjectFromProto(req.GetSubject())
 
@@ -703,6 +712,7 @@ func (a *AccessController) Check(ctx context.Context, req *aclpb.CheckRequest) (
 	return &response, nil
 }
 
+// WriteRelationTuplesTxn inserts, deletes, or both, within an atomic transaction, one or more relation tuples.
 func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclpb.WriteRelationTuplesTxnRequest) (*aclpb.WriteRelationTuplesTxnResponse, error) {
 
 	inserts := []*InternalRelationTuple{}
@@ -719,10 +729,10 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 		configSnapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
 		if err != nil {
 			if err == ErrNoLocalNamespacesDefined {
-				return nil, fmt.Errorf("No namespace configs have been added yet. Please add a namespace config and then proceed. If you recently added one, it may take a couple minutes to propagate")
+				return nil, fmt.Errorf("no namespace configs have been added yet. Please add a namespace config and then proceed. If you recently added one, it may take a couple minutes to propagate")
 			}
 
-			return nil, fmt.Errorf("'%s' namespace is undefined at this time. If this namespace was recently added, please try again in a couple of minutes.", namespace)
+			return nil, fmt.Errorf("'%s' namespace is undefined at this time. If this namespace was recently added, please try again in a couple of minutes", namespace)
 		}
 
 		irt := InternalRelationTuple{
@@ -737,7 +747,7 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 
 			rewrite := rewriteFromNamespaceConfig(relation, configSnapshot.Config)
 			if rewrite == nil {
-				return nil, fmt.Errorf("Relation '%s' is undefined in namespace '%s' at snapshot config timestamp '%s'", relation, namespace, configSnapshot.Timestamp)
+				return nil, fmt.Errorf("relation '%s' is undefined in namespace '%s' at snapshot config timestamp '%s'", relation, namespace, configSnapshot.Timestamp)
 			}
 
 			switch ref := rt.GetSubject().GetRef().(type) {
@@ -747,12 +757,12 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 
 				configSnapshot, err := a.chooseNamespaceConfigSnapshot(n)
 				if err != nil {
-					return nil, fmt.Errorf("SubjectSet '%s' references the '%s' namespace which is undefined at this time. If this namespace was recently added, please try again in a couple minutes.", subject.String(), n)
+					return nil, fmt.Errorf("SubjectSet '%s' references the '%s' namespace which is undefined at this time. If this namespace was recently added, please try again in a couple minutes", subject.String(), n)
 				}
 
 				rewrite := rewriteFromNamespaceConfig(r, configSnapshot.Config)
 				if rewrite == nil {
-					return nil, fmt.Errorf("SubjectSet '%s' references relation '%s' which is undefined in the namespace '%s' at snapshot config timestamp '%s'. If this relation was recently added to the config, please try again in a couple minutes.", subject.String(), r, n, configSnapshot.Timestamp)
+					return nil, fmt.Errorf("SubjectSet '%s' references relation '%s' which is undefined in the namespace '%s' at snapshot config timestamp '%s'. If this relation was recently added to the config, please try again in a couple minutes", subject.String(), r, n, configSnapshot.Timestamp)
 				}
 			}
 
@@ -769,6 +779,9 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 	return &aclpb.WriteRelationTuplesTxnResponse{}, nil
 }
 
+// ListRelationTuples fetches relation tuples matching the request Query and filters the response fields
+// by the provided ExpandMask. No indirect relations are followed, only the explicit relations are
+// returned.
 func (a *AccessController) ListRelationTuples(ctx context.Context, req *aclpb.ListRelationTuplesRequest) (*aclpb.ListRelationTuplesResponse, error) {
 
 	tuples, err := a.RelationTupleStore.ListRelationTuples(ctx, req.GetQuery(), req.GetExpandMask())
@@ -798,7 +811,7 @@ func (a *AccessController) Expand(ctx context.Context, req *aclpb.ExpandRequest)
 	configSnapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
 	if err != nil {
 		if err == ErrNoLocalNamespacesDefined {
-			return nil, fmt.Errorf("No namespace configs have been added yet. Please add a namespace config and then proceed. If you recently added one, it may take a couple minutes to propagate")
+			return nil, fmt.Errorf("no namespace configs have been added yet. Please add a namespace config and then proceed. If you recently added one, it may take a couple minutes to propagate")
 		}
 
 		return nil, err
@@ -816,6 +829,7 @@ func (a *AccessController) Expand(ctx context.Context, req *aclpb.ExpandRequest)
 	return resp, nil
 }
 
+// AddConfig adds a new namespace configuration. If the namespace already exists, an error is returned.
 func (a *AccessController) AddConfig(ctx context.Context, req *aclpb.AddConfigRequest) (*aclpb.AddConfigResponse, error) {
 
 	if req.GetConfig() == nil {
@@ -838,25 +852,33 @@ func (a *AccessController) AddConfig(ctx context.Context, req *aclpb.AddConfigRe
 	return &(aclpb.AddConfigResponse{}), nil
 }
 
+// ReadConfig fetches the namespace configuration for the provided namespace. If the namespace
+// does not exist, an error is returned.
 func (a *AccessController) ReadConfig(ctx context.Context, req *aclpb.ReadConfigRequest) (*aclpb.ReadConfigResponse, error) {
 
-	if req.GetNamespace() == "" {
+	namespace := req.GetNamespace()
+	if namespace == "" {
 		return nil, status.Error(codes.InvalidArgument, "The 'namespace' field is required and cannot be empty.")
 	}
 
-	config, err := a.NamespaceManager.GetConfig(ctx, req.GetNamespace())
+	config, err := a.NamespaceManager.GetConfig(ctx, namespace)
 	if err != nil {
+		if err == ErrNamespaceDoesntExist {
+			return nil, status.Errorf(codes.NotFound, "The namespace '%s' does not exist. If it was recently added, please try again in a couple of minutes", namespace)
+		}
 		return nil, err
 	}
 
 	resp := &aclpb.ReadConfigResponse{
-		Namespace: req.GetNamespace(),
+		Namespace: namespace,
 		Config:    config,
 	}
 
 	return resp, nil
 }
 
+// WriteRelation upserts the namespace relation to the provided namespace config. If the namespace
+// does not exist, an error is returned.
 func (a *AccessController) WriteRelation(ctx context.Context, req *aclpb.WriteRelationRequest) (*aclpb.WriteRelationResponse, error) {
 
 	namespace := req.GetNamespace()
@@ -883,21 +905,40 @@ func (a *AccessController) WriteRelation(ctx context.Context, req *aclpb.WriteRe
 	return &(aclpb.WriteRelationResponse{}), nil
 }
 
+// NodeMeta is used to retrieve meta-data about the current node
+// when broadcasting an alive message to other peers. It's length
+// is limited to the given byte size.
+//
+// For more information see https://pkg.go.dev/github.com/hashicorp/memberlist#Delegate
 func (a *AccessController) NodeMeta(limit int) []byte {
 	var meta []byte
 	return meta
 }
 
+// NotifyMsg is called when a user-data message is received from a peer. Care
+// should be taken that this method does not block, since doing so would block
+// the entire UDP packet receive loop in the gossip. Additionally, the byte slice
+// may be modified after the call returns, so it should be copied if needed.
+//
+// For more information see https://pkg.go.dev/github.com/hashicorp/memberlist#Delegate
 func (a *AccessController) NotifyMsg(msg []byte) {}
 
+// GetBroadcasts is called when user-data messages can be broadcast to peers.
+// It should return a list of buffers to send. Each buffer should assume an
+// overhead as provided with a limit on the total byte size allowed. The total
+// byte size of the resulting data to send must not exceed the limit. Care
+// should be taken that this method does not block, since doing so would block
+// the entire UDP packet receive loop.
+//
+// For more information see https://pkg.go.dev/github.com/hashicorp/memberlist#Delegate
 func (a *AccessController) GetBroadcasts(overhead, limit int) [][]byte {
 	var buf [][]byte
 	return buf
 }
 
 // LocalState is used for a TCP Push/Pull between nodes in the cluster. The
-// buffer returned here is broadcasted to the other nodes in the cluster
-// in addition to the membership information. Any data can be sent here.
+// buffer returned here is broadcasted to the other peers in the cluster in
+// addition to the membership information. Any data can be sent here.
 //
 // For more information see https://pkg.go.dev/github.com/hashicorp/memberlist#Delegate
 func (a *AccessController) LocalState(join bool) []byte {
@@ -948,6 +989,8 @@ func (a *AccessController) MergeRemoteState(buf []byte, join bool) {
 	}
 }
 
+// Close terminates this access-controller's cluster membership and gracefully closes
+// any remaining resources.
 func (a *AccessController) Close() error {
 	return a.Node.Memberlist.Leave(5 * time.Second)
 }
