@@ -9,9 +9,17 @@ import (
 	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
 )
 
-var ErrNamespaceAlreadyExists error = errors.New("The provided namespace already exists.")
-var ErrNamespaceDoesntExist error = errors.New("The provided namespace doesn't exist, please add it first.")
-var ErrNoLocalNamespacesDefined error = errors.New("No local namespace configs have been defined at this time.")
+// ErrNamespaceAlreadyExists is an error that occurrs when attempting to add a namespace config
+// for a namespace that has been previously added.
+var ErrNamespaceAlreadyExists error = errors.New("the provided namespace already exists")
+
+// ErrNamespaceDoesntExist is an error that occurrs when attempting to fetch a namespace config
+// for a namespace that doesn't exist.
+var ErrNamespaceDoesntExist error = errors.New("the provided namespace doesn't exist, please add it first")
+
+// ErrNoLocalNamespacesDefined is an error that occurrs when attempting to fetch a namespace config
+// and no local namespaces have been defined.
+var ErrNoLocalNamespacesDefined error = errors.New("no local namespace configs have been defined at this time")
 
 var nsConfigSnapshotTimestampKey ctxKey
 
@@ -27,10 +35,15 @@ func NamespaceConfigTimestampFromContext(ctx context.Context) (time.Time, bool) 
 	return timestamp, ok
 }
 
+// NamespaceOperation represents the operations that can be taken on namespace configs.
 type NamespaceOperation string
 
 const (
-	AddNamespace    NamespaceOperation = "ADD"
+
+	// AddNamespace is the operation when a new namespace config is added.
+	AddNamespace NamespaceOperation = "ADD"
+
+	// UpdateNamespace is the operation when a namespace config is updated.
 	UpdateNamespace NamespaceOperation = "UPDATE"
 )
 

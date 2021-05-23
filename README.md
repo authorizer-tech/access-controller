@@ -1,5 +1,7 @@
 # access-controller
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/authorizer-tech/access-controller)](https://goreportcard.com/report/github.com/authorizer-tech/access-controller)
+
 An implementation of a distributed access-control server that is based on [Google Zanzibar](https://research.google/pubs/pub48190/) - "Google's Consistent, Global Authorization System".
 
 An instance of an `access-controller` is similar to the `aclserver` implementation called out in the paper. A cluster of access-controllers implement the functional equivalent of the Zanzibar `aclserver` cluster.

@@ -5,8 +5,12 @@ import (
 	"sync"
 )
 
-var ErrClientNotFound = fmt.Errorf("The client with the provided identifier was not found")
+// ErrClientNotFound is an error that occurrs if a ClientRouter.GetClient call is
+// invoked with a nodeID that does not exist.
+var ErrClientNotFound = fmt.Errorf("the client with the provided identifier was not found")
 
+// ClientRouter defines an interface to manage RPC clients for nodes/peers
+// within a cluster.
 type ClientRouter interface {
 	AddClient(nodeID string, client interface{})
 	GetClient(nodeID string) (interface{}, error)
@@ -20,6 +24,8 @@ type mapClientRouter struct {
 	cache map[string]interface{}
 }
 
+// NewMapClientRouter creates an in-memory, map based, ClientRouter. It is
+// safe for concurrent use.
 func NewMapClientRouter() ClientRouter {
 	r := mapClientRouter{
 		cache: map[string]interface{}{},

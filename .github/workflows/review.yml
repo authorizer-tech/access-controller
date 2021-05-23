@@ -1,0 +1,41 @@
+name: review
+
+on: [pull_request]
+
+jobs:
+  job1:
+    name: "Go: Vet, Check, & Test"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v1
+        with:
+          go-version: 1.16
+      - run: make install-tools
+      - run: echo $(go env GOPATH)/bin >> $GITHUB_PATH
+      - run: buf generate
+
+      - name: "Go: Vet and Check"
+        run: |
+          go vet ./...
+          staticcheck ./...
+
+      - name: "Go: Test Coverage"
+        run: |
+          go test -race -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Upload coverage to Codecov
+        run: bash <(curl -s https://codecov.io/bash)
+      
+  job2:
+    name: "Buf: Lint & Breaking Changes"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: wizhi/setup-buf@v1
+        with:
+          version: 0.42.1
+      - run: buf lint
+      - run: buf breaking --against "https://github.com/authorizer-tech/access-controller.git#branch=master"

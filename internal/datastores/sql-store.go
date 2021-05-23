@@ -5,7 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/doug-martin/goqu/v9"
-	_ "github.com/doug-martin/goqu/v9/dialect/postgres"
+	_ "github.com/doug-martin/goqu/v9/dialect/postgres" // use postgres dialect driver
 	_ "github.com/lib/pq"
 
 	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
@@ -13,10 +13,12 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
+// SQLStore implements the RelationTupleStore interface for a sql storage adapter.
 type SQLStore struct {
 	DB *sql.DB
 }
 
+// SubjectSets fetches the subject sets for all of the (object, relation) pairs provided.
 func (s *SQLStore) SubjectSets(ctx context.Context, object ac.Object, relations ...string) ([]ac.SubjectSet, error) {
 
 	sqlbuilder := goqu.Dialect("postgres").From(object.Namespace).Select("subject").Where(
@@ -56,6 +58,7 @@ func (s *SQLStore) SubjectSets(ctx context.Context, object ac.Object, relations 
 	return subjects, nil
 }
 
+// RowCount returns the number of rows matching the relation tuple query provided.
 func (s *SQLStore) RowCount(ctx context.Context, query ac.RelationTupleQuery) (int64, error) {
 
 	sqlbuilder := goqu.Dialect("postgres").From(query.Object.Namespace).Select(
@@ -81,6 +84,8 @@ func (s *SQLStore) RowCount(ctx context.Context, query ac.RelationTupleQuery) (i
 	return count, nil
 }
 
+// ListRelationTuples lists the relation tuples matching the request query and filters the response fields
+// by the provided field mask.
 func (s *SQLStore) ListRelationTuples(ctx context.Context, query *aclpb.ListRelationTuplesRequest_Query, mask *fieldmaskpb.FieldMask) ([]ac.InternalRelationTuple, error) {
 
 	// if len(mask.GetPaths()) > 0 {
@@ -141,6 +146,9 @@ func (s *SQLStore) ListRelationTuples(ctx context.Context, query *aclpb.ListRela
 	return tuples, nil
 }
 
+// TransactRelationTuples applies, with the same txn, the relation tuple inserts and deletions provided.
+// Each insertion/deletion includes a corresponding changelog entry with an operation indicating what was
+// applied.
 func (s *SQLStore) TransactRelationTuples(ctx context.Context, tupleInserts []*ac.InternalRelationTuple, tupleDeletes []*ac.InternalRelationTuple) error {
 
 	txn, err := s.DB.Begin()

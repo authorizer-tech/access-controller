@@ -1,4 +1,5 @@
 .vscode/
 dist/
-localconfig
+genprotos/
+localconfig/
 coverage.out

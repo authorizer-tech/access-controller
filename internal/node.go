@@ -3,7 +3,6 @@ package accesscontroller
 import (
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
@@ -12,6 +11,8 @@ import (
 	"google.golang.org/grpc"
 )
 
+// NodeConfigs represent the configurations for an individual node withn a gossip
+// cluster.
 type NodeConfigs struct {
 
 	// A unique identifier for this node in the cluster.
@@ -25,7 +26,7 @@ type NodeConfigs struct {
 	// join this node to.
 	Join string
 
-	// The port that cluster membership gossip is occuring on.
+	// The port that cluster membership gossip is occurring on.
 	NodePort int
 
 	// The port serving the access-controller RPCs.
@@ -44,13 +45,12 @@ type NodeMetadata struct {
 // of other members in the cluster and clients for communicating with
 // other nodes.
 type Node struct {
-	rw sync.RWMutex
 
 	// The unique identifier of the node within the cluster.
 	ID string
 
 	Memberlist *memberlist.Memberlist
-	RpcRouter  ClientRouter
+	RPCRouter  ClientRouter
 	Hashring   Hashring
 }
 
@@ -82,7 +82,7 @@ func (n *Node) NotifyJoin(member *memberlist.Node) {
 
 		client := aclpb.NewCheckServiceClient(conn)
 
-		n.RpcRouter.AddClient(nodeID, client)
+		n.RPCRouter.AddClient(nodeID, client)
 	}
 
 	n.Hashring.Add(member)
@@ -97,7 +97,7 @@ func (n *Node) NotifyLeave(member *memberlist.Node) {
 
 	nodeID := member.String()
 	if nodeID != n.ID {
-		n.RpcRouter.RemoveClient(nodeID)
+		n.RPCRouter.RemoveClient(nodeID)
 	}
 
 	n.Hashring.Remove(member)

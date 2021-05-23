@@ -21,6 +21,8 @@ func (h hasher) Sum64(data []byte) uint64 {
 	return xxhash.Sum64(data)
 }
 
+// HashringMember represents an interface that types must implement to be a member of
+// a Hashring.
 type HashringMember interface {
 	String() string
 }
