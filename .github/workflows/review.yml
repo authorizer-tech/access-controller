@@ -13,18 +13,16 @@ jobs:
       - uses: actions/setup-go@v1
         with:
           go-version: 1.16
-      - run: make install-tools
       - run: echo $(go env GOPATH)/bin >> $GITHUB_PATH
-      - run: buf generate
+      - run: make generate
 
-      - name: "Go: Vet and Check"
+      - name: "Go: vet, fmt, lint"
         run: |
-          go vet ./...
-          staticcheck ./...
+          make check
 
       - name: "Go: Test Coverage"
         run: |
-          go test -race -coverprofile=coverage.txt -covermode=atomic ./...
+          make ci-test-coverage
 
       - name: Upload coverage to Codecov
         run: bash <(curl -s https://codecov.io/bash)

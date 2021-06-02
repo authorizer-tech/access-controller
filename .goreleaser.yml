@@ -2,8 +2,7 @@ project_name: access-controller
 
 before:
   hooks:
-    - make install-tools
-    - buf generate
+    - make generate
 builds:
   - main: ./cmd/access-controller/main.go
     binary: bin/access-controller
@@ -30,6 +29,7 @@ dockers:
     - "gcr.io/jon-whit/authorizer-tech/access-controller"
     extra_files:
     - testdata
+    - db/migrations
 checksum:
   name_template: 'checksums.txt'
 snapshot:

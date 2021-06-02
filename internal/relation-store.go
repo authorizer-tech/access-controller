@@ -1,5 +1,7 @@
 package accesscontroller
 
+//go:generate mockgen -self_package github.com/authorizer-tech/access-controller/internal -destination=./mock_relationstore_test.go -package accesscontroller . RelationTupleStore
+
 import (
 	"context"
 
