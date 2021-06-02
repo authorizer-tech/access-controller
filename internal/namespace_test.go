@@ -91,7 +91,7 @@ func TestInMemPeerNamespaceConfigStore_SetNamespaceConfigSnapshot(t *testing.T) 
 		t.Errorf("Expected nil error, but got '%v'", err)
 	}
 
-	cfg1, ok := store.configs["peer1"][config1.Name][timestamp1]
+	cfg1, ok := store.configs["peer1"][config1.Name][timestamp1.Round(0).UTC()]
 	if !ok {
 		t.Errorf("Expected ok to be true, but got false")
 	} else {
@@ -100,7 +100,7 @@ func TestInMemPeerNamespaceConfigStore_SetNamespaceConfigSnapshot(t *testing.T) 
 		}
 	}
 
-	cfg2, ok := store.configs["peer1"][config2.Name][timestamp1]
+	cfg2, ok := store.configs["peer1"][config2.Name][timestamp1.Round(0).UTC()]
 	if !ok {
 		t.Errorf("Expected ok to be true, but got false")
 	} else {
@@ -109,7 +109,7 @@ func TestInMemPeerNamespaceConfigStore_SetNamespaceConfigSnapshot(t *testing.T) 
 		}
 	}
 
-	cfg3, ok := store.configs["peer1"][config3.Name][timestamp2]
+	cfg3, ok := store.configs["peer1"][config3.Name][timestamp2.Round(0).UTC()]
 	if !ok {
 		t.Errorf("Expected ok to be true, but got false")
 	} else {

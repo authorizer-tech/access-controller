@@ -180,6 +180,10 @@ func (p *inmemPeerNamespaceConfigStore) SetNamespaceConfigSnapshot(peerID string
 	p.rwmu.Lock()
 	defer p.rwmu.Unlock()
 
+	// To guarantee map key equality, time values must have identical Locations
+	// and the monotonic clock reading should be stripped.
+	ts = ts.Round(0).UTC()
+
 	namespaceConfigs, ok := p.configs[peerID]
 	if !ok {
 		// key doesn't exist yet, write it!

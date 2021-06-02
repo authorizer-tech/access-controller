@@ -217,7 +217,7 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 			},
 			output: output{
 				err: NamespaceConfigError{
-					Message: fmt.Sprintf("'%s' relation is undefined in namespace '%s' at snapshot config timestamp '%s'", "relation2", namespace1Config.Name, timestamp1),
+					Message: fmt.Sprintf("'%s' relation is undefined in namespace '%s' at snapshot config timestamp '%s'", "relation2", namespace1Config.Name, timestamp1.Round(0).UTC()),
 					Type:    NamespaceRelationUndefined,
 				}.ToStatus().Err(),
 			},
@@ -293,7 +293,7 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 			},
 			output: output{
 				err: NamespaceConfigError{
-					Message: fmt.Sprintf("SubjectSet '%s' references relation '%s' which is undefined in the namespace '%s' at snapshot config timestamp '%s'. If this relation was recently added to the config, please try again in a couple minutes", subjectSet, "relation2", subjectSet.Namespace, timestamp1),
+					Message: fmt.Sprintf("SubjectSet '%s' references relation '%s' which is undefined in the namespace '%s' at snapshot config timestamp '%s'. If this relation was recently added to the config, please try again in a couple minutes", subjectSet, "relation2", subjectSet.Namespace, timestamp1.Round(0).UTC()),
 					Type:    NamespaceRelationUndefined,
 				}.ToStatus().Err(),
 			},
@@ -856,7 +856,7 @@ func TestAccessController_LocalState(t *testing.T) {
 
 	snapshots := map[string]map[time.Time][]byte{
 		config1.Name: {
-			timestamp1: jsonConfig1,
+			timestamp1.Round(0).UTC(): jsonConfig1,
 		},
 	}
 
@@ -883,7 +883,7 @@ func TestAccessController_MergeRemoteState(t *testing.T) {
 		join bool
 	}
 
-	timestamp1 := time.Now().Round(0) // strip the monotonic clock reading to allow for matching
+	timestamp1 := time.Now().Round(0).UTC()
 
 	config1 := &aclpb.NamespaceConfig{
 		Name: "namespace1",
