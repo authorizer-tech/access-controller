@@ -289,8 +289,10 @@ func (a *AccessController) checkLeaf(ctx context.Context, op *aclpb.SetOperation
 			Relations: []string{relation},
 			Subject:   &SubjectID{ID: user},
 		}
-		count, _ := a.RelationTupleStore.RowCount(ctx, query)
-		// todo: capture error
+		count, err := a.RelationTupleStore.RowCount(ctx, query)
+		if err != nil {
+			return false, err
+		}
 
 		if count > 0 {
 			return true, nil
@@ -298,9 +300,12 @@ func (a *AccessController) checkLeaf(ctx context.Context, op *aclpb.SetOperation
 
 		// compute indirect ACLs referenced by subject sets from the tuples
 		// SELECT * FROM namespace WHERE relation=<rewrite.relation> AND subject LIKE '_%%:_%%#_%%'
-		subjects, _ := a.RelationTupleStore.SubjectSets(ctx, obj, relation)
-		// todo: capture error
+		subjects, err := a.RelationTupleStore.SubjectSets(ctx, obj, relation)
+		if err != nil {
+			return false, err
+		}
 
+		// todo: these checks could be done concurrently to optimize check performance
 		for _, subject := range subjects {
 
 			permitted, err := a.check(ctx, subject.Namespace, subject.Object, subject.Relation, user)
@@ -323,7 +328,10 @@ func (a *AccessController) checkLeaf(ctx context.Context, op *aclpb.SetOperation
 			ID:        object,
 		}
 
-		subjects, _ := a.RelationTupleStore.SubjectSets(ctx, obj, rewrite.TupleToSubjectset.GetTupleset().GetRelation())
+		subjects, err := a.RelationTupleStore.SubjectSets(ctx, obj, rewrite.TupleToSubjectset.GetTupleset().GetRelation())
+		if err != nil {
+			return false, err
+		}
 
 		for _, subject := range subjects {
 			relation := subject.Relation
@@ -553,8 +561,10 @@ EVAL:
 	}
 
 	if cfg == nil {
-		message := fmt.Sprintf("No namespace configuration was found for namespace '%s' at timestamp '%s'", namespace, snapshotTimestamp)
-		return false, status.Error(codes.Internal, message) // todo: choose appropriate code here
+		return false, NamespaceConfigError{
+			Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
+			Type:    NamespaceDoesntExist,
+		}.ToStatus().Err()
 	}
 
 	rewrite := rewriteFromNamespaceConfig(relation, cfg)

@@ -16,61 +16,367 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// func TestAccessController_check(t *testing.T) {
+func TestAccessController_check(t *testing.T) {
 
-// 	type input struct {
-// 		namespace string
-// 		object    string
-// 		relation  string
-// 		subject   string
-// 	}
+	dbError := errors.New("database error")
 
-// 	type output struct {
-// 		allowed bool
-// 		err     error
-// 	}
+	timestamp1 := time.Now()
 
-// 	tests := []struct {
-// 		name string
-// 		input
-// 		output
-// 	}{}
+	groupsConfig := &aclpb.NamespaceConfig{
+		Name: "groups",
+		Relations: []*aclpb.Relation{
+			{Name: "member"},
+		},
+	}
 
-// 	for _, test := range tests {
-// 		t.Run(test.name, func(t *testing.T) {
+	dirsConfig := &aclpb.NamespaceConfig{
+		Name: "dirs",
+		Relations: []*aclpb.Relation{
+			{Name: "viewer"},
+		},
+	}
 
-// 			ctrl := gomock.NewController(t)
-// 			defer ctrl.Finish()
+	filesConfig := &aclpb.NamespaceConfig{
+		Name: "files",
+		Relations: []*aclpb.Relation{
+			{
+				Name: "owner",
+			},
+			{
+				Name: "editor",
+				Rewrite: &aclpb.Rewrite{
+					RewriteOperation: &aclpb.Rewrite_Intersection{
+						Intersection: &aclpb.SetOperation{
+							Children: []*aclpb.SetOperation_Child{
+								{ChildType: &aclpb.SetOperation_Child_Rewrite{
+									Rewrite: &aclpb.Rewrite{
+										RewriteOperation: &aclpb.Rewrite_Union{
+											Union: &aclpb.SetOperation{
+												Children: []*aclpb.SetOperation_Child{
+													{ChildType: &aclpb.SetOperation_Child_This_{
+														This: &aclpb.SetOperation_Child_This{},
+													}},
+													{ChildType: &aclpb.SetOperation_Child_ComputedSubjectset{
+														ComputedSubjectset: &aclpb.ComputedSubjectset{Relation: "owner"},
+													}},
+												},
+											},
+										},
+									},
+								}},
+							},
+						},
+					},
+				},
+			},
+			{
+				Name: "viewer",
+				Rewrite: &aclpb.Rewrite{
+					RewriteOperation: &aclpb.Rewrite_Union{
+						Union: &aclpb.SetOperation{
+							Children: []*aclpb.SetOperation_Child{
+								{
+									ChildType: &aclpb.SetOperation_Child_TupleToSubjectset{
+										TupleToSubjectset: &aclpb.TupleToSubjectset{
+											Tupleset: &aclpb.TupleToSubjectset_Tupleset{
+												Relation: "parent",
+											},
+											ComputedSubjectset: &aclpb.ComputedSubjectset{
+												Relation: "viewer",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
 
-// 			mockStore := NewMockRelationTupleStore(ctrl)
-// 			mockNamespaceManager := NewMockNamespaceManager(ctrl)
+	type input struct {
+		ctx       context.Context
+		namespace string
+		object    string
+		relation  string
+		subject   string
+	}
 
-// 			mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).DoAndReturn(func() (ChangelogIterator, error) {
-// 				return nil, fmt.Errorf("Not Implemented Yet")
-// 			}).AnyTimes()
+	type output struct {
+		allowed bool
+		err     error
+	}
 
-// 			opts := []AccessControllerOption{
-// 				WithStore(mockStore),
-// 				WithNamespaceManager(mockNamespaceManager),
-// 			}
+	tests := []struct {
+		name string
+		input
+		output
+		mockController func(mstore *MockRelationTupleStore)
+	}{
+		{
+			name: "Test-1: Direct ACL without rewrite allowed",
+			input: input{
+				ctx:       context.Background(),
+				namespace: "groups",
+				object:    "group1",
+				relation:  "member",
+				subject:   "subject1",
+			},
+			output: output{
+				allowed: true,
+			},
+			mockController: func(mstore *MockRelationTupleStore) {
+				mstore.EXPECT().RowCount(gomock.Any(), RelationTupleQuery{
+					Object: Object{
+						Namespace: "groups",
+						ID:        "group1",
+					},
+					Relations: []string{"member"},
+					Subject:   &SubjectID{ID: "subject1"},
+				}).Return(int64(1), nil)
+			},
+		},
+		{
+			name: "Test-2: No errors and not allowed",
+			input: input{
+				ctx:       context.Background(),
+				namespace: "groups",
+				object:    "group1",
+				relation:  "member",
+				subject:   "subject1",
+			},
+			output: output{
+				allowed: false,
+			},
+			mockController: func(mstore *MockRelationTupleStore) {
+				gomock.InOrder(
+					mstore.EXPECT().RowCount(gomock.Any(), gomock.Any()).Return(int64(0), nil),
 
-// 			controller, err := NewAccessController(opts...)
-// 			if err != nil {
-// 				t.Fatalf("Failed to initialize the AccessController: %v", err)
-// 			}
+					mstore.EXPECT().SubjectSets(gomock.Any(), Object{
+						Namespace: "groups",
+						ID:        "group1",
+					}, "member").Return([]SubjectSet{}, nil),
+				)
+			},
+		},
+		{
+			name: "Test-3: RelationTupleStore.RowCount error",
+			input: input{
+				ctx:       context.Background(),
+				namespace: "groups",
+				object:    "group1",
+				relation:  "member",
+				subject:   "subject1",
+			},
+			output: output{
+				allowed: false,
+				err:     dbError,
+			},
+			mockController: func(mstore *MockRelationTupleStore) {
+				mstore.EXPECT().RowCount(gomock.Any(), gomock.Any()).Return(int64(-1), dbError)
+			},
+		},
+		{
+			name: "Test-4: Nested Rewrites with allowed outcome",
+			input: input{
+				ctx:       context.Background(),
+				namespace: "files",
+				object:    "file1",
+				relation:  "editor",
+				subject:   "subject1",
+			},
+			output: output{
+				allowed: true,
+			},
+			mockController: func(mstore *MockRelationTupleStore) {
 
-// 			allowed, err := controller.check(context.Background(), test.input.namespace, test.input.object, test.input.relation, test.input.subject)
+				mstore.EXPECT().RowCount(gomock.Any(), RelationTupleQuery{
+					Object: Object{
+						Namespace: "files",
+						ID:        "file1",
+					},
+					Relations: []string{"editor"},
+					Subject:   &SubjectID{ID: "subject1"},
+				}).Return(int64(0), nil)
 
-// 			if !errors.Is(err, test.output.err) {
-// 				t.Errorf("Expected error '%v', but got '%v'", err, test.output.err)
-// 			}
+				mstore.EXPECT().RowCount(gomock.Any(), RelationTupleQuery{
+					Object: Object{
+						Namespace: "files",
+						ID:        "file1",
+					},
+					Relations: []string{"owner"},
+					Subject:   &SubjectID{ID: "subject1"},
+				}).Return(int64(1), nil)
 
-// 			if allowed != test.output.allowed {
-// 				t.Errorf("Expected '%v', but got '%v'", allowed, test.output.allowed)
-// 			}
-// 		})
-// 	}
-// }
+				mstore.EXPECT().SubjectSets(gomock.Any(), Object{
+					Namespace: "files",
+					ID:        "file1",
+				}, "editor").Return([]SubjectSet{}, nil)
+			},
+		},
+		{
+			name: "Test-5: SubjectSet Indirection Followed",
+			input: input{
+				ctx:       context.Background(),
+				namespace: "groups",
+				object:    "group1",
+				relation:  "member",
+				subject:   "subject1",
+			},
+			output: output{
+				allowed: true,
+			},
+			mockController: func(mstore *MockRelationTupleStore) {
+
+				mstore.EXPECT().RowCount(gomock.Any(), RelationTupleQuery{
+					Object: Object{
+						Namespace: "groups",
+						ID:        "group1",
+					},
+					Relations: []string{"member"},
+					Subject:   &SubjectID{ID: "subject1"},
+				}).Return(int64(0), nil)
+
+				mstore.EXPECT().RowCount(gomock.Any(), RelationTupleQuery{
+					Object: Object{
+						Namespace: "groups",
+						ID:        "group2",
+					},
+					Relations: []string{"member"},
+					Subject:   &SubjectID{ID: "subject1"},
+				}).Return(int64(1), nil)
+
+				mstore.EXPECT().SubjectSets(gomock.Any(), Object{
+					Namespace: "groups",
+					ID:        "group1",
+				}, "member").Return([]SubjectSet{
+					{
+						Namespace: "groups",
+						Object:    "group2",
+						Relation:  "member",
+					},
+				}, nil)
+			},
+		},
+		{
+			name: "Test-6: TupleToSubjectSet Indirection Followed",
+			input: input{
+				ctx:       context.Background(),
+				namespace: "files",
+				object:    "file1",
+				relation:  "viewer",
+				subject:   "subject1",
+			},
+			output: output{
+				allowed: true,
+			},
+			mockController: func(mstore *MockRelationTupleStore) {
+
+				mstore.EXPECT().RowCount(gomock.Any(), RelationTupleQuery{
+					Object: Object{
+						Namespace: "dirs",
+						ID:        "dir1",
+					},
+					Relations: []string{"viewer"},
+					Subject:   &SubjectID{ID: "subject1"},
+				}).Return(int64(1), nil)
+
+				mstore.EXPECT().SubjectSets(gomock.Any(), Object{
+					Namespace: "files",
+					ID:        "file1",
+				}, "parent").Return([]SubjectSet{
+					{
+						Namespace: "dirs",
+						Object:    "dir1",
+						Relation:  "...",
+					},
+				}, nil)
+			},
+		},
+		{
+			name: "Test-7: TupleToSubjectSet with allowed=false outcome",
+			input: input{
+				ctx:       context.Background(),
+				namespace: "files",
+				object:    "file1",
+				relation:  "viewer",
+				subject:   "subject1",
+			},
+			output: output{
+				allowed: false,
+			},
+			mockController: func(mstore *MockRelationTupleStore) {
+
+				mstore.EXPECT().SubjectSets(gomock.Any(), Object{
+					Namespace: "files",
+					ID:        "file1",
+				}, "parent").Return([]SubjectSet{}, nil)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockStore := NewMockRelationTupleStore(ctrl)
+			mockNamespaceManager := NewMockNamespaceManager(ctrl)
+
+			if test.mockController != nil {
+				test.mockController(mockStore)
+			}
+
+			mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
+				changelog := []*NamespaceChangelogEntry{
+					{
+						Namespace: groupsConfig.Name,
+						Operation: AddNamespace,
+						Config:    groupsConfig,
+						Timestamp: timestamp1,
+					},
+					{
+						Namespace: filesConfig.Name,
+						Operation: AddNamespace,
+						Config:    filesConfig,
+						Timestamp: timestamp1,
+					},
+					{
+						Namespace: dirsConfig.Name,
+						Operation: AddNamespace,
+						Config:    dirsConfig,
+						Timestamp: timestamp1,
+					},
+				}
+				iter := NewMockChangelogIterator(changelog)
+
+				return iter, nil
+			}).AnyTimes()
+
+			opts := []AccessControllerOption{
+				WithStore(mockStore),
+				WithNamespaceManager(mockNamespaceManager),
+			}
+
+			controller, err := NewAccessController(opts...)
+			if err != nil {
+				t.Fatalf("Failed to initialize the AccessController: %v", err)
+			}
+
+			allowed, err := controller.check(test.input.ctx, test.input.namespace, test.input.object, test.input.relation, test.input.subject)
+
+			if !errors.Is(err, test.output.err) {
+				t.Errorf("Expected error '%v', but got '%v'", err, test.output.err)
+			}
+
+			if allowed != test.output.allowed {
+				t.Errorf("Expected '%v', but got '%v'", test.output.allowed, allowed)
+			}
+		})
+	}
+}
 
 var namespace1Config = &aclpb.NamespaceConfig{
 	Name: "namespace1",
