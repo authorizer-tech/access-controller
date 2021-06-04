@@ -85,11 +85,15 @@ type SubjectSet struct {
 // the SubjectSet are equivalent. Two SubjectSets are equivalent
 // if they define the same (namespace, object, relation) tuple.
 func (s *SubjectSet) Equals(v interface{}) bool {
-	uv, ok := v.(*SubjectSet)
-	if !ok {
-		return false
+
+	switch ss := v.(type) {
+	case *SubjectSet:
+		return ss.Relation == s.Relation && ss.Object == s.Object && ss.Namespace == s.Namespace
+	case SubjectSet:
+		return ss.Relation == s.Relation && ss.Object == s.Object && ss.Namespace == s.Namespace
 	}
-	return uv.Relation == s.Relation && uv.Object == s.Object && uv.Namespace == s.Namespace
+
+	return false
 }
 
 // String returns the string representation of the SubjectSet.
@@ -147,7 +151,7 @@ type InternalRelationTuple struct {
 }
 
 // String returns r as a relation tuple in string format.
-func (r *InternalRelationTuple) String() string {
+func (r InternalRelationTuple) String() string {
 	return fmt.Sprintf("%s:%s#%s@%s", r.Namespace, r.Object, r.Relation, r.Subject)
 }
 
@@ -213,9 +217,9 @@ func SubjectFromProto(sub *pb.Subject) Subject {
 			Object:    s.Set.Object,
 			Relation:  s.Set.Relation,
 		}
+	default:
+		return nil // impossible to hit this unless we export another unexpected type from the protos
 	}
-
-	return nil
 }
 
 type RelationTupleQuery struct {

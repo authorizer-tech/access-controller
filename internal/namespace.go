@@ -1,5 +1,7 @@
 package accesscontroller
 
+//go:generate mockgen -self_package github.com/authorizer-tech/access-controller/internal -destination=./mock_namespace_manager_test.go -package accesscontroller . NamespaceManager,PeerNamespaceConfigStore
+
 import (
 	"context"
 	"errors"
@@ -7,7 +9,50 @@ import (
 	"time"
 
 	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+// NamespaceConfigErrorType defines an enumeration over various types of Namespace Config
+// errors that can occur.
+type NamespaceConfigErrorType int
+
+const (
+
+	// NamespaceAlreadyExists is an error that occurrs when attempting to add a namespace config
+	// for a namespace that has been previously added.
+	NamespaceAlreadyExists NamespaceConfigErrorType = iota
+
+	// NamespaceDoesntExist is an error that occurrs when attempting to fetch a namespace config
+	// for a namespace that doesn't exist.
+	NamespaceDoesntExist
+
+	// NamespaceRelationUndefined is an error that occurs when referencing an undefined relation
+	// in a namespace config.
+	NamespaceRelationUndefined
+)
+
+// NamespaceConfigError represents an error type that is surfaced when Namespace Config
+// errors are encountered.
+type NamespaceConfigError struct {
+	Message string
+	Type    NamespaceConfigErrorType
+}
+
+// Error returns the NamespaceConfigError as an error string.
+func (e NamespaceConfigError) Error() string {
+	return e.Message
+}
+
+// ToStatus returns the namespace config error as a grpc status.
+func (e NamespaceConfigError) ToStatus() *status.Status {
+	switch e.Type {
+	case NamespaceDoesntExist:
+		return status.New(codes.InvalidArgument, e.Message)
+	default:
+		return status.New(codes.Unknown, e.Message)
+	}
+}
 
 // ErrNamespaceAlreadyExists is an error that occurrs when attempting to add a namespace config
 // for a namespace that has been previously added.
@@ -135,6 +180,10 @@ func (p *inmemPeerNamespaceConfigStore) SetNamespaceConfigSnapshot(peerID string
 	p.rwmu.Lock()
 	defer p.rwmu.Unlock()
 
+	// To guarantee map key equality, time values must have identical Locations
+	// and the monotonic clock reading should be stripped.
+	ts = ts.Round(0).UTC()
+
 	namespaceConfigs, ok := p.configs[peerID]
 	if !ok {
 		// key doesn't exist yet, write it!
@@ -199,7 +248,7 @@ func (p *inmemPeerNamespaceConfigStore) GetNamespaceConfigSnapshots(peerID strin
 
 	configs, ok := p.configs[peerID]
 	if !ok {
-		return nil, nil
+		return map[string]map[time.Time]*aclpb.NamespaceConfig{}, nil
 	}
 
 	return configs, nil

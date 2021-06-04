@@ -52,16 +52,28 @@ func (m *sqlNamespaceManager) AddConfig(ctx context.Context, cfg *aclpb.Namespac
 		return ac.ErrNamespaceAlreadyExists
 	}
 
+	stmt := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
+		object text,
+		relation text,
+		subject text,
+		PRIMARY KEY (object, relation, subject)
+	)`, cfg.GetName())
+
+	_, err = txn.Exec(stmt)
+	if err != nil {
+		return err
+	}
+
 	ins1 := goqu.Insert("namespace-configs").
 		Cols("namespace", "config", "timestamp").
 		Vals(
-			goqu.Vals{cfg.Name, jsonConfig, goqu.L("NOW()")},
+			goqu.Vals{cfg.GetName(), jsonConfig, goqu.L("NOW()")},
 		)
 
 	ins2 := goqu.Insert("namespace-changelog").
 		Cols("namespace", "operation", "config", "timestamp").
 		Vals(
-			goqu.Vals{cfg.Name, ac.AddNamespace, jsonConfig, goqu.L("NOW()")}, // todo: make sure this is an appropriate txn commit timestamp
+			goqu.Vals{cfg.GetName(), ac.AddNamespace, jsonConfig, goqu.L("NOW()")}, // todo: make sure this is an appropriate txn commit timestamp
 		)
 
 	sql1, args1, err := ins1.ToSQL()
@@ -84,18 +96,6 @@ func (m *sqlNamespaceManager) AddConfig(ctx context.Context, cfg *aclpb.Namespac
 		return err
 	}
 
-	stmt := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-		object text,
-		relation text,
-		subject text,
-		PRIMARY KEY (object, relation, subject)
-	)`, cfg.Name)
-
-	_, err = txn.Exec(stmt)
-	if err != nil {
-		return err
-	}
-
 	return txn.Commit()
 }
 
@@ -110,7 +110,7 @@ func (m *sqlNamespaceManager) GetConfig(ctx context.Context, namespace string) (
 	var jsonConfig string
 	if err := row.Scan(&jsonConfig); err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil
+			return nil, ac.ErrNamespaceDoesntExist
 		}
 
 		return nil, err

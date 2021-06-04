@@ -9,20 +9,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/buraksezer/consistent"
 	"github.com/hashicorp/memberlist"
 	"github.com/pkg/errors"
 
 	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
 	log "github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
-
-var peerNamespaceConfigs PeerNamespaceConfigStore = &inmemPeerNamespaceConfigStore{
-	configs: make(map[string]map[string]map[time.Time]*aclpb.NamespaceConfig),
-}
 
 type AccessController struct {
 	aclpb.UnimplementedCheckServiceServer
@@ -31,10 +28,16 @@ type AccessController struct {
 	aclpb.UnimplementedExpandServiceServer
 	aclpb.UnimplementedNamespaceConfigServiceServer
 
-	*Node
+	Memberlist *memberlist.Memberlist
+	RPCRouter  ClientRouter
+	Hashring   Hashring
+
 	RelationTupleStore
+	PeerNamespaceConfigStore
 	NamespaceManager
 	NodeConfigs
+
+	shutdown chan struct{}
 }
 
 type AccessControllerOption func(*AccessController)
@@ -65,56 +68,61 @@ func WithNodeConfigs(cfg NodeConfigs) AccessControllerOption {
 // to this node in an in-memory namespace config store.
 func (a *AccessController) watchNamespaceConfigs(ctx context.Context) {
 
-	for {
+	go func() {
+		for {
 
-		// Watch the top 3 most recent changes per namespace.
-		//
-		// The assumption here is that each peer/node of the cluster should
-		// have enough time to have processed one of the last three changes per
-		// namespace. At a later date we'll capture metrics around this to quantify
-		// a more accurate threshold based on quantitative analysis from running in
-		// production.
-		iter, err := a.NamespaceManager.TopChanges(context.TODO(), 3)
-		if err != nil {
-			// todo: handle this more gracefully.. we'll slam the database continuously right
-			// now if we experience errors back to back in a short interval of time.
-			log.Errorf("Failed to list top namespace config changes: %v", err)
-			continue
-		}
-
-		for iter.Next() {
-			change, err := iter.Value()
+			// Watch the top 3 most recent changes per namespace.
+			//
+			// The assumption here is that each peer/node of the cluster should
+			// have enough time to have processed one of the last three changes per
+			// namespace. At a later date we'll capture metrics around this to quantify
+			// a more accurate threshold based on quantitative analysis from running in
+			// production.
+			iter, err := a.NamespaceManager.TopChanges(context.Background(), 3)
 			if err != nil {
-				log.Errorf("Failed to fetch the next value from the ChangelogIterator: %v", err)
+				// todo: handle this more gracefully.. we'll slam the database continuously right
+				// now if we experience errors back to back in a short interval of time.
+				log.Errorf("Failed to list top namespace config changes: %v", err)
+				continue
 			}
 
-			namespace := change.Namespace
-			config := change.Config
-			timestamp := change.Timestamp
-
-			switch change.Operation {
-			case AddNamespace, UpdateNamespace:
-				err := peerNamespaceConfigs.SetNamespaceConfigSnapshot(a.ServerID, namespace, config, timestamp)
+			for iter.Next() {
+				change, err := iter.Value()
 				if err != nil {
-					log.Errorf("Failed to set the namespace config snapshot for this node: %v", err)
+					log.Errorf("Failed to fetch the next value from the ChangelogIterator: %v", err)
+					break
 				}
-			default:
-				panic("An expected namespace operation was encountered")
-			}
-		}
-		if err := iter.Close(ctx); err != nil {
-			log.Errorf("Failed to close the namespace config iterator: %v", err)
-		}
 
-		time.Sleep(2 * time.Second)
-	}
+				namespace := change.Namespace
+				config := change.Config
+				timestamp := change.Timestamp
+
+				switch change.Operation {
+				case AddNamespace, UpdateNamespace:
+					err := a.PeerNamespaceConfigStore.SetNamespaceConfigSnapshot(a.ServerID, namespace, config, timestamp)
+					if err != nil {
+						log.Errorf("Failed to set the namespace config snapshot for this node: %v", err)
+					}
+				default:
+					panic("An expected namespace operation was encountered")
+				}
+			}
+			if err := iter.Close(ctx); err != nil {
+				log.Errorf("Failed to close the namespace config iterator: %v", err)
+			}
+
+			time.Sleep(2 * time.Second)
+		}
+	}()
+
+	<-a.shutdown
 }
 
 // chooseNamespaceConfigSnapshot selects the most recent namespace config snapshot that is
 // common to all peers/nodes within the cluster that this node is a part of.
 func (a *AccessController) chooseNamespaceConfigSnapshot(namespace string) (*NamespaceConfigSnapshot, error) {
 
-	peerSnapshots, err := peerNamespaceConfigs.ListNamespaceConfigSnapshots(namespace)
+	peerSnapshots, err := a.PeerNamespaceConfigStore.ListNamespaceConfigSnapshots(namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +163,7 @@ func (a *AccessController) chooseNamespaceConfigSnapshot(namespace string) (*Nam
 		}
 
 		if len(commonTimestamps) < 1 {
-			return nil, fmt.Errorf("no common namespace config snapshot timestamp(s) were found for namespace '%s'", namespace)
+			return nil, ErrNoLocalNamespacesDefined
 		}
 	} else {
 		return nil, ErrNoLocalNamespacesDefined
@@ -181,7 +189,16 @@ func (a *AccessController) chooseNamespaceConfigSnapshot(namespace string) (*Nam
 // NewAccessController constructs a new AccessController with the options provided.
 func NewAccessController(opts ...AccessControllerOption) (*AccessController, error) {
 
-	ac := AccessController{}
+	peerConfigs := &inmemPeerNamespaceConfigStore{
+		configs: make(map[string]map[string]map[time.Time]*aclpb.NamespaceConfig),
+	}
+
+	ac := AccessController{
+		RPCRouter:                NewMapClientRouter(),
+		Hashring:                 NewConsistentHashring(nil),
+		PeerNamespaceConfigStore: peerConfigs,
+		shutdown:                 make(chan struct{}),
+	}
 
 	for _, opt := range opts {
 		opt(&ac)
@@ -201,7 +218,7 @@ func NewAccessController(opts ...AccessControllerOption) (*AccessController, err
 
 		switch entry.Operation {
 		case AddNamespace, UpdateNamespace:
-			err = peerNamespaceConfigs.SetNamespaceConfigSnapshot(ac.ServerID, entry.Namespace, entry.Config, entry.Timestamp)
+			err = peerConfigs.SetNamespaceConfigSnapshot(ac.ServerID, entry.Namespace, entry.Config, entry.Timestamp)
 			if err != nil {
 				return nil, err
 			}
@@ -217,39 +234,23 @@ func NewAccessController(opts ...AccessControllerOption) (*AccessController, err
 	// Start watching for namespace configuration changes in the background
 	go ac.watchNamespaceConfigs(context.Background())
 
-	ring := consistent.New(nil, consistent.Config{
-		Hasher:            &hasher{},
-		PartitionCount:    31,
-		ReplicationFactor: 3,
-		Load:              1.25,
-	})
-
-	node := &Node{
-		ID:        ac.ServerID,
-		RPCRouter: NewMapClientRouter(),
-		Hashring: &ConsistentHashring{
-			Ring: ring,
-		},
-	}
-	ac.Node = node
-
 	memberlistConfig := memberlist.DefaultLANConfig()
 	memberlistConfig.PushPullInterval = 10 * time.Second
-	memberlistConfig.Name = node.ID
+	memberlistConfig.Name = ac.ServerID
 
 	if ac.Advertise != "" {
 		memberlistConfig.AdvertiseAddr = ac.Advertise
 	}
 
 	memberlistConfig.BindPort = ac.NodePort
-	memberlistConfig.Events = node
+	memberlistConfig.Events = &ac
 	memberlistConfig.Delegate = &ac
 
 	list, err := memberlist.Create(memberlistConfig)
 	if err != nil {
 		return nil, err
 	}
-	node.Memberlist = list
+	ac.Memberlist = list
 
 	meta, err := json.Marshal(NodeMetadata{
 		ServerPort: ac.ServerPort,
@@ -289,8 +290,10 @@ func (a *AccessController) checkLeaf(ctx context.Context, op *aclpb.SetOperation
 			Relations: []string{relation},
 			Subject:   &SubjectID{ID: user},
 		}
-		count, _ := a.RelationTupleStore.RowCount(ctx, query)
-		// todo: capture error
+		count, err := a.RelationTupleStore.RowCount(ctx, query)
+		if err != nil {
+			return false, err
+		}
 
 		if count > 0 {
 			return true, nil
@@ -298,9 +301,12 @@ func (a *AccessController) checkLeaf(ctx context.Context, op *aclpb.SetOperation
 
 		// compute indirect ACLs referenced by subject sets from the tuples
 		// SELECT * FROM namespace WHERE relation=<rewrite.relation> AND subject LIKE '_%%:_%%#_%%'
-		subjects, _ := a.RelationTupleStore.SubjectSets(ctx, obj, relation)
-		// todo: capture error
+		subjects, err := a.RelationTupleStore.SubjectSets(ctx, obj, relation)
+		if err != nil {
+			return false, err
+		}
 
+		// todo: these checks could be done concurrently to optimize check performance
 		for _, subject := range subjects {
 
 			permitted, err := a.check(ctx, subject.Namespace, subject.Object, subject.Relation, user)
@@ -323,7 +329,10 @@ func (a *AccessController) checkLeaf(ctx context.Context, op *aclpb.SetOperation
 			ID:        object,
 		}
 
-		subjects, _ := a.RelationTupleStore.SubjectSets(ctx, obj, rewrite.TupleToSubjectset.GetTupleset().GetRelation())
+		subjects, err := a.RelationTupleStore.SubjectSets(ctx, obj, rewrite.TupleToSubjectset.GetTupleset().GetRelation())
+		if err != nil {
+			return false, err
+		}
 
 		for _, subject := range subjects {
 			relation := subject.Relation
@@ -463,7 +472,10 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 		snapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
 		if err != nil {
 			if err == ErrNoLocalNamespacesDefined {
-				return false, fmt.Errorf("no namespace configs have been added yet. Please add a namespace config and then proceed. If you recently added one, it may take a couple minutes to propagate")
+				return false, NamespaceConfigError{
+					Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
+					Type:    NamespaceDoesntExist,
+				}
 			}
 			return false, err
 		}
@@ -473,8 +485,8 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 		snapshotTimestamp = peerNamespaceCfgTs
 	}
 
-	forwardingNodeID := a.Hashring.LocateKey([]byte(object))
-	if forwardingNodeID != a.ID {
+	forwardingNodeID := a.Hashring.LocateKey([]byte(object)).String()
+	if forwardingNodeID != a.ServerID {
 
 		log.Tracef("Proxying Check RPC request to node '%v'..", forwardingNodeID)
 
@@ -512,8 +524,8 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 				goto EVAL // fallback to evaluating the query locally
 			}
 
-			forwardingNodeID := a.Hashring.LocateKey([]byte(object))
-			if forwardingNodeID == a.ID {
+			forwardingNodeID := a.Hashring.LocateKey([]byte(object)).String()
+			if forwardingNodeID == a.ServerID {
 				goto EVAL
 			}
 
@@ -544,14 +556,16 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 
 EVAL:
 
-	cfg, err := peerNamespaceConfigs.GetNamespaceConfigSnapshot(a.ServerID, namespace, snapshotTimestamp)
+	cfg, err := a.PeerNamespaceConfigStore.GetNamespaceConfigSnapshot(a.ServerID, namespace, snapshotTimestamp)
 	if err != nil {
 		return false, err
 	}
 
 	if cfg == nil {
-		message := fmt.Sprintf("No namespace configuration was found for namespace '%s' at timestamp '%s'", namespace, snapshotTimestamp)
-		return false, status.Error(codes.Internal, message) // todo: choose appropriate code here
+		return false, NamespaceConfigError{
+			Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
+			Type:    NamespaceDoesntExist,
+		}.ToStatus().Err()
 	}
 
 	rewrite := rewriteFromNamespaceConfig(relation, cfg)
@@ -563,7 +577,7 @@ EVAL:
 	return a.checkRewrite(ctx, rewrite, namespace, object, relation, subject)
 }
 
-func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb.Rewrite, tree *SubjectTree, namespace, object, relation string, configSnapshot *NamespaceConfigSnapshot, depth uint) (*SubjectTree, error) {
+func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb.Rewrite, tree *SubjectTree, namespace, object, relation string, depth uint) (*SubjectTree, error) {
 
 	op := rewrite.GetRewriteOperation()
 
@@ -585,7 +599,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 				Subject: tree.Subject,
 			}
 
-			t, err := a.expandWithRewrite(ctx, rewrite, subTree, namespace, object, relation, configSnapshot, depth)
+			t, err := a.expandWithRewrite(ctx, rewrite, subTree, namespace, object, relation, depth)
 			if err != nil {
 				return nil, err
 			}
@@ -614,7 +628,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 						if rr == "..." {
 							rr = relation
 						}
-						t, err := a.expand(ctx, ss.Namespace, ss.Object, rr, configSnapshot, depth-1)
+						t, err := a.expand(ctx, ss.Namespace, ss.Object, rr, depth-1)
 						if err != nil {
 							return nil, err
 						}
@@ -628,7 +642,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 					}
 				}
 			case *aclpb.SetOperation_Child_ComputedSubjectset:
-				t, err := a.expand(ctx, namespace, object, so.ComputedSubjectset.GetRelation(), configSnapshot, depth-1)
+				t, err := a.expand(ctx, namespace, object, so.ComputedSubjectset.GetRelation(), depth-1)
 				if err != nil {
 					return nil, err
 				}
@@ -659,7 +673,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 						if rr == "..." {
 							rr = relation
 						}
-						t, err := a.expand(ctx, ss.Namespace, ss.Object, rr, configSnapshot, depth-1)
+						t, err := a.expand(ctx, ss.Namespace, ss.Object, rr, depth-1)
 						if err != nil {
 							return nil, err
 						}
@@ -679,7 +693,19 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 	return tree, nil
 }
 
-func (a *AccessController) expand(ctx context.Context, namespace, object, relation string, configSnapshot *NamespaceConfigSnapshot, depth uint) (*SubjectTree, error) {
+func (a *AccessController) expand(ctx context.Context, namespace, object, relation string, depth uint) (*SubjectTree, error) {
+
+	configSnapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
+	if err != nil {
+		if err == ErrNoLocalNamespacesDefined {
+			return nil, NamespaceConfigError{
+				Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
+				Type:    NamespaceDoesntExist,
+			}.ToStatus().Err()
+		}
+
+		return nil, err
+	}
 
 	rewrite := rewriteFromNamespaceConfig(relation, configSnapshot.Config)
 	if rewrite == nil {
@@ -693,12 +719,16 @@ func (a *AccessController) expand(ctx context.Context, namespace, object, relati
 			Relation:  relation,
 		},
 	}
-	return a.expandWithRewrite(ctx, rewrite, tree, namespace, object, relation, configSnapshot, depth)
+	return a.expandWithRewrite(ctx, rewrite, tree, namespace, object, relation, depth)
 }
 
 // Check checks if a Subject has a relation to an object within a namespace.
 func (a *AccessController) Check(ctx context.Context, req *aclpb.CheckRequest) (*aclpb.CheckResponse, error) {
 	subject := SubjectFromProto(req.GetSubject())
+
+	if subject == nil {
+		return nil, status.Error(codes.InvalidArgument, "'subject' is a required field")
+	}
 
 	response := aclpb.CheckResponse{}
 
@@ -728,11 +758,10 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 
 		configSnapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
 		if err != nil {
-			if err == ErrNoLocalNamespacesDefined {
-				return nil, fmt.Errorf("no namespace configs have been added yet. Please add a namespace config and then proceed. If you recently added one, it may take a couple minutes to propagate")
-			}
-
-			return nil, fmt.Errorf("'%s' namespace is undefined at this time. If this namespace was recently added, please try again in a couple of minutes", namespace)
+			return nil, NamespaceConfigError{
+				Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
+				Type:    NamespaceDoesntExist,
+			}.ToStatus().Err()
 		}
 
 		irt := InternalRelationTuple{
@@ -747,7 +776,10 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 
 			rewrite := rewriteFromNamespaceConfig(relation, configSnapshot.Config)
 			if rewrite == nil {
-				return nil, fmt.Errorf("relation '%s' is undefined in namespace '%s' at snapshot config timestamp '%s'", relation, namespace, configSnapshot.Timestamp)
+				return nil, NamespaceConfigError{
+					Message: fmt.Sprintf("'%s' relation is undefined in namespace '%s' at snapshot config timestamp '%s'", relation, namespace, configSnapshot.Timestamp),
+					Type:    NamespaceRelationUndefined,
+				}.ToStatus().Err()
 			}
 
 			switch ref := rt.GetSubject().GetRef().(type) {
@@ -757,12 +789,18 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 
 				configSnapshot, err := a.chooseNamespaceConfigSnapshot(n)
 				if err != nil {
-					return nil, fmt.Errorf("SubjectSet '%s' references the '%s' namespace which is undefined at this time. If this namespace was recently added, please try again in a couple minutes", subject.String(), n)
+					return nil, NamespaceConfigError{
+						Message: fmt.Sprintf("SubjectSet '%s' references the '%s' namespace which is undefined. If this namespace was recently added, please try again in a couple minutes", subject.String(), n),
+						Type:    NamespaceDoesntExist,
+					}.ToStatus().Err()
 				}
 
 				rewrite := rewriteFromNamespaceConfig(r, configSnapshot.Config)
 				if rewrite == nil {
-					return nil, fmt.Errorf("SubjectSet '%s' references relation '%s' which is undefined in the namespace '%s' at snapshot config timestamp '%s'. If this relation was recently added to the config, please try again in a couple minutes", subject.String(), r, n, configSnapshot.Timestamp)
+					return nil, NamespaceConfigError{
+						Message: fmt.Sprintf("SubjectSet '%s' references relation '%s' which is undefined in the namespace '%s' at snapshot config timestamp '%s'. If this relation was recently added to the config, please try again in a couple minutes", subject.String(), r, n, configSnapshot.Timestamp),
+						Type:    NamespaceRelationUndefined,
+					}.ToStatus().Err()
 				}
 			}
 
@@ -808,16 +846,7 @@ func (a *AccessController) Expand(ctx context.Context, req *aclpb.ExpandRequest)
 	object := subject.GetObject()
 	relation := subject.GetRelation()
 
-	configSnapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
-	if err != nil {
-		if err == ErrNoLocalNamespacesDefined {
-			return nil, fmt.Errorf("no namespace configs have been added yet. Please add a namespace config and then proceed. If you recently added one, it may take a couple minutes to propagate")
-		}
-
-		return nil, err
-	}
-
-	tree, err := a.expand(ctx, namespace, object, relation, configSnapshot, 12)
+	tree, err := a.expand(ctx, namespace, object, relation, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -943,7 +972,7 @@ func (a *AccessController) GetBroadcasts(overhead, limit int) [][]byte {
 // For more information see https://pkg.go.dev/github.com/hashicorp/memberlist#Delegate
 func (a *AccessController) LocalState(join bool) []byte {
 
-	configs, err := peerNamespaceConfigs.GetNamespaceConfigSnapshots(a.ServerID)
+	configs, err := a.PeerNamespaceConfigStore.GetNamespaceConfigSnapshots(a.ServerID)
 	if err != nil {
 		log.Errorf("Failed to fetch namespace config snapshots for this node's LocalState: %v", err)
 	}
@@ -952,10 +981,28 @@ func (a *AccessController) LocalState(join bool) []byte {
 		panic("This node's local namespace config snapshots do not exist. Something is seriously wrong!")
 	}
 
+	serializedConfigs := map[string]map[time.Time][]byte{}
+	for namespace, snapshots := range configs {
+		for timestamp, config := range snapshots {
+			bytes, err := protojson.Marshal(config)
+			if err != nil {
+				log.Errorf("Failed to protojson.Marshal the namespace configuration: %v", err)
+			}
+
+			if _, ok := serializedConfigs[namespace]; !ok {
+				serializedConfigs[namespace] = map[time.Time][]byte{
+					timestamp: bytes,
+				}
+			} else {
+				serializedConfigs[namespace][timestamp] = bytes
+			}
+		}
+	}
+
 	meta := NodeMetadata{
-		NodeID:                   a.ID,
+		NodeID:                   a.ServerID,
 		ServerPort:               a.ServerPort,
-		NamespaceConfigSnapshots: configs,
+		NamespaceConfigSnapshots: serializedConfigs,
 	}
 
 	data, err := json.Marshal(meta)
@@ -976,23 +1023,91 @@ func (a *AccessController) MergeRemoteState(buf []byte, join bool) {
 	var remoteState NodeMetadata
 	if err := json.Unmarshal(buf, &remoteState); err != nil {
 		log.Errorf("Failed to json.Unmarshal the remote peer's metadata: %v", err)
+		return
 	}
 
 	for namespace, configSnapshots := range remoteState.NamespaceConfigSnapshots {
 
 		for ts, config := range configSnapshots {
-			err := peerNamespaceConfigs.SetNamespaceConfigSnapshot(remoteState.NodeID, namespace, config, ts)
-			if err != nil {
-				log.Errorf("Failed to write namespace config snapshot in MergeRemoteState: %v", err)
+
+			var deserializedConfig aclpb.NamespaceConfig
+			if err := protojson.Unmarshal(config, &deserializedConfig); err != nil {
+				log.Errorf("Failed to protojson.Unmarshal a remote peer's namespace config snapshot: %v", err)
+			} else {
+				err := a.PeerNamespaceConfigStore.SetNamespaceConfigSnapshot(remoteState.NodeID, namespace, &deserializedConfig, ts)
+				if err != nil {
+					log.Errorf("Failed to write namespace config snapshot in MergeRemoteState: %v", err)
+				}
 			}
 		}
 	}
 }
 
+// NotifyJoin is invoked when a new node has joined the cluster.
+// The `member` argument must not be modified.
+func (a *AccessController) NotifyJoin(member *memberlist.Node) {
+
+	log.Infof("Cluster member with id '%s' joined the cluster at address '%s'", member.String(), member.FullAddress().Addr)
+
+	nodeID := member.String()
+	if nodeID != a.ServerID {
+		var meta NodeMetadata
+		if err := json.Unmarshal(member.Meta, &meta); err != nil {
+			log.Errorf("Failed to json.Unmarshal the Node metadata: %v", err)
+			return
+		}
+
+		remoteAddr := fmt.Sprintf("%s:%d", member.Addr, meta.ServerPort)
+
+		opts := []grpc.DialOption{
+			grpc.WithInsecure(),
+		}
+		conn, err := grpc.Dial(remoteAddr, opts...)
+		if err != nil {
+			log.Errorf("Failed to establish a grpc connection to cluster member '%s' at address '%s'", nodeID, remoteAddr)
+			return
+		}
+
+		client := aclpb.NewCheckServiceClient(conn)
+
+		a.RPCRouter.AddClient(nodeID, client)
+	}
+
+	a.Hashring.Add(member)
+	log.Tracef("hashring checksum: %d", a.Hashring.Checksum())
+}
+
+// NotifyLeave is invoked when a node leaves the cluster. The
+// `member` argument must not be modified.
+func (a *AccessController) NotifyLeave(member *memberlist.Node) {
+
+	log.Infof("Cluster member with id '%v' at address '%v' left the cluster", member.String(), member.FullAddress().Addr)
+
+	nodeID := member.String()
+	if nodeID != a.ServerID {
+		a.RPCRouter.RemoveClient(nodeID)
+	}
+
+	a.Hashring.Remove(member)
+	log.Tracef("hashring checksum: %d", a.Hashring.Checksum())
+
+	err := a.PeerNamespaceConfigStore.DeleteNamespaceConfigSnapshots(nodeID)
+	if err != nil {
+		log.Errorf("Failed to delete namespace config snapshots for peer with id '%s'", nodeID)
+	}
+}
+
+// NotifyUpdate is invoked when a node in the cluster is updated,
+// usually involving the meta-data of the node. The `member` argument
+// must not be modified.
+func (a *AccessController) NotifyUpdate(member *memberlist.Node) {}
+
 // Close terminates this access-controller's cluster membership and gracefully closes
 // any remaining resources.
 func (a *AccessController) Close() error {
-	return a.Node.Memberlist.Leave(5 * time.Second)
+	a.shutdown <- struct{}{}
+
+	return a.Memberlist.Leave(5 * time.Second)
 }
 
 // rewriteFromNamespaceConfig returns the rewrite rule from the provided namespace config for the

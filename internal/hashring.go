@@ -1,5 +1,7 @@
 package accesscontroller
 
+//go:generate mockgen -self_package github.com/authorizer-tech/access-controller/internal -destination=./mock_hashring_test.go -package accesscontroller . Hashring
+
 import (
 	"context"
 	"hash/crc32"
@@ -37,7 +39,7 @@ type Hashring interface {
 	Remove(member HashringMember)
 
 	// LocateKey finds the nearest hashring member for a given key.
-	LocateKey(key []byte) string
+	LocateKey(key []byte) HashringMember
 
 	// Checksum computes the CRC32 checksum of the Hashring.
 	//
@@ -65,7 +67,27 @@ func ChecksumFromContext(ctx context.Context) (uint32, bool) {
 // ConsistentHashring implements a Hashring using consistent hashing with bounded loads.
 type ConsistentHashring struct {
 	rw   sync.RWMutex
-	Ring *consistent.Consistent
+	ring *consistent.Consistent
+}
+
+// NewConsistentHashring returns a Hashring using consistent hashing with bounded loads. The
+// distribution of the load in the hashring is specified via the config provided. If the cfg
+// is nil, defaults are used.
+func NewConsistentHashring(cfg *consistent.Config) Hashring {
+
+	if cfg == nil {
+		cfg = &consistent.Config{
+			Hasher:            &hasher{},
+			PartitionCount:    31,
+			ReplicationFactor: 3,
+			Load:              1.25,
+		}
+	}
+
+	hashring := &ConsistentHashring{
+		ring: consistent.New(nil, *cfg),
+	}
+	return hashring
 }
 
 // Add adds the provided hashring member to the hashring
@@ -73,7 +95,7 @@ type ConsistentHashring struct {
 func (ch *ConsistentHashring) Add(member HashringMember) {
 	defer ch.rw.Unlock()
 	ch.rw.Lock()
-	ch.Ring.Add(consistent.Member(member))
+	ch.ring.Add(consistent.Member(member))
 }
 
 // Remove removes the provided hashring member from the hashring
@@ -81,15 +103,15 @@ func (ch *ConsistentHashring) Add(member HashringMember) {
 func (ch *ConsistentHashring) Remove(member HashringMember) {
 	defer ch.rw.Unlock()
 	ch.rw.Lock()
-	ch.Ring.Remove(member.String())
+	ch.ring.Remove(member.String())
 }
 
 // LocateKey locates the nearest hashring member to the given
 // key.
-func (ch *ConsistentHashring) LocateKey(key []byte) string {
+func (ch *ConsistentHashring) LocateKey(key []byte) HashringMember {
 	defer ch.rw.RUnlock()
 	ch.rw.RLock()
-	return ch.Ring.LocateKey(key).String()
+	return ch.ring.LocateKey(key)
 }
 
 // Checksum computes a consistent CRC32 checksum of the hashring
@@ -99,7 +121,7 @@ func (ch *ConsistentHashring) Checksum() uint32 {
 	ch.rw.RLock()
 
 	memberSet := make(map[string]struct{})
-	for _, member := range ch.Ring.GetMembers() {
+	for _, member := range ch.ring.GetMembers() {
 		memberSet[member.String()] = struct{}{}
 	}
 

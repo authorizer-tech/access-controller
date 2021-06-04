@@ -3,3 +3,4 @@ dist/
 genprotos/
 localconfig/
 coverage.out
+internal/mock_*.go

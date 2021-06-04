@@ -13,6 +13,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/cockroachdb"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/google/uuid"
 	gwruntime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	_ "github.com/lib/pq"
@@ -40,6 +43,7 @@ var grpcPort = flag.Int("grpc-port", 50052, "The bind port for the grpc server")
 var httpPort = flag.Int("http-port", 8082, "The bind port for the grpc-gateway http server")
 var join = flag.String("join", "", "A comma-separated list of 'host:port' addresses for nodes in the cluster to join to")
 var configPath = flag.String("config", "./localconfig/config.yaml", "The path to the server config")
+var migrations = flag.String("migrations", "./db/migrations", "The absolute path to the database migrations directory")
 
 type config struct {
 	GrpcGateway struct {
@@ -81,10 +85,28 @@ func main() {
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
-		log.Fatalf("Failed to establish a connection to Postgres database: %v", err)
+		log.Fatalf("Failed to establish a connection to the database: %v", err)
 	}
 	if err := db.Ping(); err != nil {
 		log.Fatalf("Failed to connect to the database: %v", err)
+	}
+
+	driver, err := cockroachdb.WithInstance(db, &cockroachdb.Config{})
+	if err != nil {
+		log.Fatalf("Failed to create migrator database driver instance: %v", err)
+	}
+
+	migrator, err := migrate.NewWithDatabaseInstance(
+		fmt.Sprintf("file://%s", *migrations),
+		"cockroachdb", driver)
+	if err != nil {
+		log.Fatalf("Failed to initialize the database migrator: %v", err)
+	}
+
+	if err := migrator.Up(); err != nil {
+		if err != migrate.ErrNoChange {
+			log.Fatalf("Failed to migrate up to the latest database schema: %v", err)
+		}
 	}
 
 	datastore := &datastores.SQLStore{
