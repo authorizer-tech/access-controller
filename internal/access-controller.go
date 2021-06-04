@@ -90,6 +90,7 @@ func (a *AccessController) watchNamespaceConfigs(ctx context.Context) {
 				change, err := iter.Value()
 				if err != nil {
 					log.Errorf("Failed to fetch the next value from the ChangelogIterator: %v", err)
+					break
 				}
 
 				namespace := change.Namespace
@@ -576,7 +577,7 @@ EVAL:
 	return a.checkRewrite(ctx, rewrite, namespace, object, relation, subject)
 }
 
-func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb.Rewrite, tree *SubjectTree, namespace, object, relation string, configSnapshot *NamespaceConfigSnapshot, depth uint) (*SubjectTree, error) {
+func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb.Rewrite, tree *SubjectTree, namespace, object, relation string, depth uint) (*SubjectTree, error) {
 
 	op := rewrite.GetRewriteOperation()
 
@@ -598,7 +599,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 				Subject: tree.Subject,
 			}
 
-			t, err := a.expandWithRewrite(ctx, rewrite, subTree, namespace, object, relation, configSnapshot, depth)
+			t, err := a.expandWithRewrite(ctx, rewrite, subTree, namespace, object, relation, depth)
 			if err != nil {
 				return nil, err
 			}
@@ -627,7 +628,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 						if rr == "..." {
 							rr = relation
 						}
-						t, err := a.expand(ctx, ss.Namespace, ss.Object, rr, configSnapshot, depth-1)
+						t, err := a.expand(ctx, ss.Namespace, ss.Object, rr, depth-1)
 						if err != nil {
 							return nil, err
 						}
@@ -641,7 +642,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 					}
 				}
 			case *aclpb.SetOperation_Child_ComputedSubjectset:
-				t, err := a.expand(ctx, namespace, object, so.ComputedSubjectset.GetRelation(), configSnapshot, depth-1)
+				t, err := a.expand(ctx, namespace, object, so.ComputedSubjectset.GetRelation(), depth-1)
 				if err != nil {
 					return nil, err
 				}
@@ -672,7 +673,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 						if rr == "..." {
 							rr = relation
 						}
-						t, err := a.expand(ctx, ss.Namespace, ss.Object, rr, configSnapshot, depth-1)
+						t, err := a.expand(ctx, ss.Namespace, ss.Object, rr, depth-1)
 						if err != nil {
 							return nil, err
 						}
@@ -692,7 +693,19 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 	return tree, nil
 }
 
-func (a *AccessController) expand(ctx context.Context, namespace, object, relation string, configSnapshot *NamespaceConfigSnapshot, depth uint) (*SubjectTree, error) {
+func (a *AccessController) expand(ctx context.Context, namespace, object, relation string, depth uint) (*SubjectTree, error) {
+
+	configSnapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
+	if err != nil {
+		if err == ErrNoLocalNamespacesDefined {
+			return nil, NamespaceConfigError{
+				Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
+				Type:    NamespaceDoesntExist,
+			}.ToStatus().Err()
+		}
+
+		return nil, err
+	}
 
 	rewrite := rewriteFromNamespaceConfig(relation, configSnapshot.Config)
 	if rewrite == nil {
@@ -706,12 +719,16 @@ func (a *AccessController) expand(ctx context.Context, namespace, object, relati
 			Relation:  relation,
 		},
 	}
-	return a.expandWithRewrite(ctx, rewrite, tree, namespace, object, relation, configSnapshot, depth)
+	return a.expandWithRewrite(ctx, rewrite, tree, namespace, object, relation, depth)
 }
 
 // Check checks if a Subject has a relation to an object within a namespace.
 func (a *AccessController) Check(ctx context.Context, req *aclpb.CheckRequest) (*aclpb.CheckResponse, error) {
 	subject := SubjectFromProto(req.GetSubject())
+
+	if subject == nil {
+		return nil, status.Error(codes.InvalidArgument, "'subject' is a required field")
+	}
 
 	response := aclpb.CheckResponse{}
 
@@ -829,19 +846,7 @@ func (a *AccessController) Expand(ctx context.Context, req *aclpb.ExpandRequest)
 	object := subject.GetObject()
 	relation := subject.GetRelation()
 
-	configSnapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
-	if err != nil {
-		if err == ErrNoLocalNamespacesDefined {
-			return nil, NamespaceConfigError{
-				Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
-				Type:    NamespaceDoesntExist,
-			}
-		}
-
-		return nil, err
-	}
-
-	tree, err := a.expand(ctx, namespace, object, relation, configSnapshot, 12)
+	tree, err := a.expand(ctx, namespace, object, relation, 12)
 	if err != nil {
 		return nil, err
 	}

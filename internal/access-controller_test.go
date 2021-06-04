@@ -12,11 +12,377 @@ import (
 	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
 	"github.com/golang/mock/gomock"
 	"github.com/hashicorp/memberlist"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
-func TestAccessController_check(t *testing.T) {
+var dirsConfig = &aclpb.NamespaceConfig{
+	Name: "dirs",
+	Relations: []*aclpb.Relation{
+		{Name: "viewer"},
+	},
+}
+
+var filesConfig = &aclpb.NamespaceConfig{
+	Name: "files",
+	Relations: []*aclpb.Relation{
+		{
+			Name: "owner",
+		},
+		{
+			Name: "editor",
+			Rewrite: &aclpb.Rewrite{
+				RewriteOperation: &aclpb.Rewrite_Intersection{
+					Intersection: &aclpb.SetOperation{
+						Children: []*aclpb.SetOperation_Child{
+							{ChildType: &aclpb.SetOperation_Child_Rewrite{
+								Rewrite: &aclpb.Rewrite{
+									RewriteOperation: &aclpb.Rewrite_Union{
+										Union: &aclpb.SetOperation{
+											Children: []*aclpb.SetOperation_Child{
+												{ChildType: &aclpb.SetOperation_Child_This_{
+													This: &aclpb.SetOperation_Child_This{},
+												}},
+												{ChildType: &aclpb.SetOperation_Child_ComputedSubjectset{
+													ComputedSubjectset: &aclpb.ComputedSubjectset{Relation: "owner"},
+												}},
+											},
+										},
+									},
+								},
+							}},
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "viewer",
+			Rewrite: &aclpb.Rewrite{
+				RewriteOperation: &aclpb.Rewrite_Union{
+					Union: &aclpb.SetOperation{
+						Children: []*aclpb.SetOperation_Child{
+							{
+								ChildType: &aclpb.SetOperation_Child_TupleToSubjectset{
+									TupleToSubjectset: &aclpb.TupleToSubjectset{
+										Tupleset: &aclpb.TupleToSubjectset_Tupleset{
+											Relation: "parent",
+										},
+										ComputedSubjectset: &aclpb.ComputedSubjectset{
+											Relation: "viewer",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+func TestAccessController_Expand(t *testing.T) {
+
+	timestamp := time.Now()
+
+	type output struct {
+		response *aclpb.ExpandResponse
+		err      error
+	}
+
+	tests := []struct {
+		name  string
+		input *aclpb.ExpandRequest
+		output
+		mockController func(store *MockRelationTupleStore)
+	}{
+		{
+			name: "Test-1: Undefined Namespace",
+			input: &aclpb.ExpandRequest{
+				SubjectSet: &aclpb.SubjectSet{Namespace: "undefined"},
+			},
+			output: output{
+				err: NamespaceConfigError{
+					Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", "undefined"),
+					Type:    NamespaceDoesntExist,
+				}.ToStatus().Err(),
+			},
+		},
+		{
+			name: "Test-2: Expand without any rewrites",
+			input: &aclpb.ExpandRequest{
+				SubjectSet: &aclpb.SubjectSet{
+					Namespace: "files",
+					Object:    "file1",
+					Relation:  "owner",
+				},
+			},
+			output: output{
+				response: &aclpb.ExpandResponse{
+					Tree: &aclpb.SubjectTree{
+						NodeType: aclpb.NodeType_NODE_TYPE_UNION,
+						Subject: &aclpb.Subject{
+							Ref: &aclpb.Subject_Set{
+								Set: &aclpb.SubjectSet{
+									Namespace: "files",
+									Object:    "file1",
+									Relation:  "owner",
+								},
+							},
+						},
+						Children: []*aclpb.SubjectTree{
+							{
+								NodeType: aclpb.NodeType_NODE_TYPE_LEAF,
+								Subject: &aclpb.Subject{
+									Ref: &aclpb.Subject_Id{Id: "subject1"},
+								},
+							},
+						},
+					},
+				},
+			},
+			mockController: func(store *MockRelationTupleStore) {
+				store.EXPECT().ListRelationTuples(gomock.Any(), &aclpb.ListRelationTuplesRequest_Query{
+					Namespace: "files",
+					Object:    "file1",
+					Relations: []string{"owner"},
+				}, &fieldmaskpb.FieldMask{}).Return([]InternalRelationTuple{
+					{
+						Namespace: "files",
+						Object:    "file1",
+						Relation:  "owner",
+						Subject:   &SubjectID{ID: "subject1"},
+					},
+				}, nil)
+			},
+		},
+		{
+			name: "Test-3: Expand without rewrites but with SubjectSet indirection",
+			input: &aclpb.ExpandRequest{
+				SubjectSet: &aclpb.SubjectSet{
+					Namespace: "files",
+					Object:    "file1",
+					Relation:  "viewer",
+				},
+			},
+			output: output{
+				response: &aclpb.ExpandResponse{
+					Tree: &aclpb.SubjectTree{
+						NodeType: aclpb.NodeType_NODE_TYPE_UNION,
+						Subject: &aclpb.Subject{
+							Ref: &aclpb.Subject_Set{
+								Set: &aclpb.SubjectSet{
+									Namespace: "files",
+									Object:    "file1",
+									Relation:  "viewer",
+								},
+							},
+						},
+						Children: []*aclpb.SubjectTree{
+							{
+								NodeType: aclpb.NodeType_NODE_TYPE_UNION,
+								Subject: &aclpb.Subject{
+									Ref: &aclpb.Subject_Set{
+										Set: &aclpb.SubjectSet{
+											Namespace: "dirs",
+											Object:    "dir1",
+											Relation:  "viewer",
+										},
+									},
+								},
+								Children: []*aclpb.SubjectTree{
+									{
+										NodeType: aclpb.NodeType_NODE_TYPE_LEAF,
+										Subject: &aclpb.Subject{
+											Ref: &aclpb.Subject_Id{Id: "subject1"},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			mockController: func(store *MockRelationTupleStore) {
+
+				store.EXPECT().ListRelationTuples(gomock.Any(), &aclpb.ListRelationTuplesRequest_Query{
+					Namespace: "files",
+					Object:    "file1",
+					Relations: []string{"parent"},
+				}, &fieldmaskpb.FieldMask{}).Return([]InternalRelationTuple{
+					{
+						Namespace: "files",
+						Object:    "file1",
+						Relation:  "parent",
+						Subject: &SubjectSet{
+							Namespace: "dirs",
+							Object:    "dir1",
+							Relation:  "...",
+						},
+					},
+				}, nil)
+
+				store.EXPECT().ListRelationTuples(gomock.Any(), &aclpb.ListRelationTuplesRequest_Query{
+					Namespace: "dirs",
+					Object:    "dir1",
+					Relations: []string{"viewer"},
+				}, &fieldmaskpb.FieldMask{}).Return([]InternalRelationTuple{
+					{
+						Namespace: "dirs",
+						Object:    "dir1",
+						Relation:  "viewer",
+						Subject:   &SubjectID{ID: "subject1"},
+					},
+				}, nil)
+			},
+		},
+		{
+			name: "Test-4: Expand with nested rewrites",
+			input: &aclpb.ExpandRequest{
+				SubjectSet: &aclpb.SubjectSet{
+					Namespace: "files",
+					Object:    "file1",
+					Relation:  "editor",
+				},
+			},
+			output: output{
+				response: &aclpb.ExpandResponse{
+					Tree: &aclpb.SubjectTree{
+						NodeType: aclpb.NodeType_NODE_TYPE_INTERSECTION,
+						Subject: &aclpb.Subject{Ref: &aclpb.Subject_Set{
+							Set: &aclpb.SubjectSet{
+								Namespace: "files",
+								Object:    "file1",
+								Relation:  "editor",
+							},
+						}},
+						Children: []*aclpb.SubjectTree{
+							{
+								NodeType: aclpb.NodeType_NODE_TYPE_UNION,
+								Subject: &aclpb.Subject{Ref: &aclpb.Subject_Set{
+									Set: &aclpb.SubjectSet{
+										Namespace: "files",
+										Object:    "file1",
+										Relation:  "editor",
+									},
+								}},
+								Children: []*aclpb.SubjectTree{
+									{
+										NodeType: aclpb.NodeType_NODE_TYPE_LEAF,
+										Subject:  &aclpb.Subject{Ref: &aclpb.Subject_Id{Id: "subject1"}},
+									},
+									{
+										NodeType: aclpb.NodeType_NODE_TYPE_UNION,
+										Subject: &aclpb.Subject{Ref: &aclpb.Subject_Set{
+											Set: &aclpb.SubjectSet{
+												Namespace: "files",
+												Object:    "file1",
+												Relation:  "owner",
+											},
+										}},
+										Children: []*aclpb.SubjectTree{
+											{
+												NodeType: aclpb.NodeType_NODE_TYPE_LEAF,
+												Subject:  &aclpb.Subject{Ref: &aclpb.Subject_Id{Id: "subject2"}},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			mockController: func(store *MockRelationTupleStore) {
+				store.EXPECT().ListRelationTuples(gomock.Any(), &aclpb.ListRelationTuplesRequest_Query{
+					Namespace: "files",
+					Object:    "file1",
+					Relations: []string{"editor"},
+				}, &fieldmaskpb.FieldMask{}).Return([]InternalRelationTuple{
+					{
+						Namespace: "files",
+						Object:    "file1",
+						Relation:  "editor",
+						Subject:   &SubjectID{ID: "subject1"},
+					},
+				}, nil)
+
+				store.EXPECT().ListRelationTuples(gomock.Any(), &aclpb.ListRelationTuplesRequest_Query{
+					Namespace: "files",
+					Object:    "file1",
+					Relations: []string{"owner"},
+				}, &fieldmaskpb.FieldMask{}).Return([]InternalRelationTuple{
+					{
+						Namespace: "files",
+						Object:    "file1",
+						Relation:  "owner",
+						Subject:   &SubjectID{ID: "subject2"},
+					},
+				}, nil)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockStore := NewMockRelationTupleStore(ctrl)
+			mockNamespaceManager := NewMockNamespaceManager(ctrl)
+
+			if test.mockController != nil {
+				test.mockController(mockStore)
+			}
+
+			mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
+				changelog := []*NamespaceChangelogEntry{
+					{
+						Namespace: filesConfig.Name,
+						Operation: AddNamespace,
+						Config:    filesConfig,
+						Timestamp: timestamp,
+					},
+					{
+						Namespace: dirsConfig.Name,
+						Operation: AddNamespace,
+						Config:    dirsConfig,
+						Timestamp: timestamp,
+					},
+				}
+				iter := NewMockChangelogIterator(changelog)
+
+				return iter, nil
+			}).AnyTimes()
+
+			opts := []AccessControllerOption{
+				WithStore(mockStore),
+				WithNamespaceManager(mockNamespaceManager),
+			}
+
+			controller, err := NewAccessController(opts...)
+			if err != nil {
+				t.Fatalf("Failed to initialize the AccessController: %v", err)
+			}
+
+			response, err := controller.Expand(context.Background(), test.input)
+
+			if !errors.Is(err, test.output.err) {
+				t.Errorf("Expected error '%v', but got '%v'", err, test.output.err)
+			}
+
+			if !proto.Equal(response, test.output.response) {
+				t.Errorf("Expected '%v', but got '%v'", test.output.response, response)
+			}
+		})
+	}
+}
+
+func TestAccessController_Check(t *testing.T) {
 
 	dbError := errors.New("database error")
 
@@ -29,83 +395,14 @@ func TestAccessController_check(t *testing.T) {
 		},
 	}
 
-	dirsConfig := &aclpb.NamespaceConfig{
-		Name: "dirs",
-		Relations: []*aclpb.Relation{
-			{Name: "viewer"},
-		},
-	}
-
-	filesConfig := &aclpb.NamespaceConfig{
-		Name: "files",
-		Relations: []*aclpb.Relation{
-			{
-				Name: "owner",
-			},
-			{
-				Name: "editor",
-				Rewrite: &aclpb.Rewrite{
-					RewriteOperation: &aclpb.Rewrite_Intersection{
-						Intersection: &aclpb.SetOperation{
-							Children: []*aclpb.SetOperation_Child{
-								{ChildType: &aclpb.SetOperation_Child_Rewrite{
-									Rewrite: &aclpb.Rewrite{
-										RewriteOperation: &aclpb.Rewrite_Union{
-											Union: &aclpb.SetOperation{
-												Children: []*aclpb.SetOperation_Child{
-													{ChildType: &aclpb.SetOperation_Child_This_{
-														This: &aclpb.SetOperation_Child_This{},
-													}},
-													{ChildType: &aclpb.SetOperation_Child_ComputedSubjectset{
-														ComputedSubjectset: &aclpb.ComputedSubjectset{Relation: "owner"},
-													}},
-												},
-											},
-										},
-									},
-								}},
-							},
-						},
-					},
-				},
-			},
-			{
-				Name: "viewer",
-				Rewrite: &aclpb.Rewrite{
-					RewriteOperation: &aclpb.Rewrite_Union{
-						Union: &aclpb.SetOperation{
-							Children: []*aclpb.SetOperation_Child{
-								{
-									ChildType: &aclpb.SetOperation_Child_TupleToSubjectset{
-										TupleToSubjectset: &aclpb.TupleToSubjectset{
-											Tupleset: &aclpb.TupleToSubjectset_Tupleset{
-												Relation: "parent",
-											},
-											ComputedSubjectset: &aclpb.ComputedSubjectset{
-												Relation: "viewer",
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
 	type input struct {
-		ctx       context.Context
-		namespace string
-		object    string
-		relation  string
-		subject   string
+		ctx context.Context
+		req *aclpb.CheckRequest
 	}
 
 	type output struct {
-		allowed bool
-		err     error
+		response *aclpb.CheckResponse
+		err      error
 	}
 
 	tests := []struct {
@@ -117,14 +414,18 @@ func TestAccessController_check(t *testing.T) {
 		{
 			name: "Test-1: Direct ACL without rewrite allowed",
 			input: input{
-				ctx:       context.Background(),
-				namespace: "groups",
-				object:    "group1",
-				relation:  "member",
-				subject:   "subject1",
+				ctx: context.Background(),
+				req: &aclpb.CheckRequest{
+					Namespace: "groups",
+					Object:    "group1",
+					Relation:  "member",
+					Subject:   &aclpb.Subject{Ref: &aclpb.Subject_Id{Id: "subject1"}},
+				},
 			},
 			output: output{
-				allowed: true,
+				response: &aclpb.CheckResponse{
+					Allowed: true,
+				},
 			},
 			mockController: func(mstore *MockRelationTupleStore) {
 				mstore.EXPECT().RowCount(gomock.Any(), RelationTupleQuery{
@@ -140,14 +441,18 @@ func TestAccessController_check(t *testing.T) {
 		{
 			name: "Test-2: No errors and not allowed",
 			input: input{
-				ctx:       context.Background(),
-				namespace: "groups",
-				object:    "group1",
-				relation:  "member",
-				subject:   "subject1",
+				ctx: context.Background(),
+				req: &aclpb.CheckRequest{
+					Namespace: "groups",
+					Object:    "group1",
+					Relation:  "member",
+					Subject:   &aclpb.Subject{Ref: &aclpb.Subject_Id{Id: "subject1"}},
+				},
 			},
 			output: output{
-				allowed: false,
+				response: &aclpb.CheckResponse{
+					Allowed: false,
+				},
 			},
 			mockController: func(mstore *MockRelationTupleStore) {
 				gomock.InOrder(
@@ -163,15 +468,16 @@ func TestAccessController_check(t *testing.T) {
 		{
 			name: "Test-3: RelationTupleStore.RowCount error",
 			input: input{
-				ctx:       context.Background(),
-				namespace: "groups",
-				object:    "group1",
-				relation:  "member",
-				subject:   "subject1",
+				ctx: context.Background(),
+				req: &aclpb.CheckRequest{
+					Namespace: "groups",
+					Object:    "group1",
+					Relation:  "member",
+					Subject:   &aclpb.Subject{Ref: &aclpb.Subject_Id{Id: "subject1"}},
+				},
 			},
 			output: output{
-				allowed: false,
-				err:     dbError,
+				err: dbError,
 			},
 			mockController: func(mstore *MockRelationTupleStore) {
 				mstore.EXPECT().RowCount(gomock.Any(), gomock.Any()).Return(int64(-1), dbError)
@@ -180,14 +486,18 @@ func TestAccessController_check(t *testing.T) {
 		{
 			name: "Test-4: Nested Rewrites with allowed outcome",
 			input: input{
-				ctx:       context.Background(),
-				namespace: "files",
-				object:    "file1",
-				relation:  "editor",
-				subject:   "subject1",
+				ctx: context.Background(),
+				req: &aclpb.CheckRequest{
+					Namespace: "files",
+					Object:    "file1",
+					Relation:  "editor",
+					Subject:   &aclpb.Subject{Ref: &aclpb.Subject_Id{Id: "subject1"}},
+				},
 			},
 			output: output{
-				allowed: true,
+				response: &aclpb.CheckResponse{
+					Allowed: true,
+				},
 			},
 			mockController: func(mstore *MockRelationTupleStore) {
 
@@ -218,14 +528,18 @@ func TestAccessController_check(t *testing.T) {
 		{
 			name: "Test-5: SubjectSet Indirection Followed",
 			input: input{
-				ctx:       context.Background(),
-				namespace: "groups",
-				object:    "group1",
-				relation:  "member",
-				subject:   "subject1",
+				ctx: context.Background(),
+				req: &aclpb.CheckRequest{
+					Namespace: "groups",
+					Object:    "group1",
+					Relation:  "member",
+					Subject:   &aclpb.Subject{Ref: &aclpb.Subject_Id{Id: "subject1"}},
+				},
 			},
 			output: output{
-				allowed: true,
+				response: &aclpb.CheckResponse{
+					Allowed: true,
+				},
 			},
 			mockController: func(mstore *MockRelationTupleStore) {
 
@@ -262,14 +576,18 @@ func TestAccessController_check(t *testing.T) {
 		{
 			name: "Test-6: TupleToSubjectSet Indirection Followed",
 			input: input{
-				ctx:       context.Background(),
-				namespace: "files",
-				object:    "file1",
-				relation:  "viewer",
-				subject:   "subject1",
+				ctx: context.Background(),
+				req: &aclpb.CheckRequest{
+					Namespace: "files",
+					Object:    "file1",
+					Relation:  "viewer",
+					Subject:   &aclpb.Subject{Ref: &aclpb.Subject_Id{Id: "subject1"}},
+				},
 			},
 			output: output{
-				allowed: true,
+				response: &aclpb.CheckResponse{
+					Allowed: true,
+				},
 			},
 			mockController: func(mstore *MockRelationTupleStore) {
 
@@ -297,14 +615,18 @@ func TestAccessController_check(t *testing.T) {
 		{
 			name: "Test-7: TupleToSubjectSet with allowed=false outcome",
 			input: input{
-				ctx:       context.Background(),
-				namespace: "files",
-				object:    "file1",
-				relation:  "viewer",
-				subject:   "subject1",
+				ctx: context.Background(),
+				req: &aclpb.CheckRequest{
+					Namespace: "files",
+					Object:    "file1",
+					Relation:  "viewer",
+					Subject:   &aclpb.Subject{Ref: &aclpb.Subject_Id{Id: "subject1"}},
+				},
 			},
 			output: output{
-				allowed: false,
+				response: &aclpb.CheckResponse{
+					Allowed: false,
+				},
 			},
 			mockController: func(mstore *MockRelationTupleStore) {
 
@@ -312,6 +634,37 @@ func TestAccessController_check(t *testing.T) {
 					Namespace: "files",
 					ID:        "file1",
 				}, "parent").Return([]SubjectSet{}, nil)
+			},
+		},
+		{
+			name: "Test-8: Checksums don't match",
+			input: input{
+				ctx: NewContextWithChecksum(context.Background(), 1),
+				req: &aclpb.CheckRequest{
+					Namespace: "files",
+					Object:    "file1",
+					Relation:  "viewer",
+					Subject:   &aclpb.Subject{Ref: &aclpb.Subject_Id{Id: "subject1"}},
+				},
+			},
+			output: output{
+				err: status.Error(codes.Internal, "Hashring checksums don't match. Retry again soon!"),
+			},
+		},
+		{
+			name: "Test-9: Top-level undefined namespace",
+			input: input{
+				ctx: context.Background(),
+				req: &aclpb.CheckRequest{
+					Namespace: "undefined",
+					Subject:   &aclpb.Subject{Ref: &aclpb.Subject_Id{Id: "subject1"}},
+				},
+			},
+			output: output{
+				err: NamespaceConfigError{
+					Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", "undefined"),
+					Type:    NamespaceDoesntExist,
+				},
 			},
 		},
 	}
@@ -365,14 +718,14 @@ func TestAccessController_check(t *testing.T) {
 				t.Fatalf("Failed to initialize the AccessController: %v", err)
 			}
 
-			allowed, err := controller.check(test.input.ctx, test.input.namespace, test.input.object, test.input.relation, test.input.subject)
+			response, err := controller.Check(test.input.ctx, test.input.req)
 
 			if !errors.Is(err, test.output.err) {
 				t.Errorf("Expected error '%v', but got '%v'", err, test.output.err)
 			}
 
-			if allowed != test.output.allowed {
-				t.Errorf("Expected '%v', but got '%v'", test.output.allowed, allowed)
+			if !proto.Equal(response, test.output.response) {
+				t.Errorf("Expected response '%v', but got '%v'", test.output.response, response)
 			}
 		})
 	}
@@ -841,6 +1194,32 @@ func TestAccessController_AddConfig(t *testing.T) {
 				nsmanager.EXPECT().AddConfig(gomock.Any(), validRequest.Config).Return(nil)
 			},
 		},
+		{
+			name:  "Test-3: Missing config field (InvalidInput)",
+			input: &aclpb.AddConfigRequest{},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "The 'config' field is required and cannot be nil."),
+			},
+		},
+		{
+			name: "Test-4: Missing config.name field (InvalidInput)",
+			input: &aclpb.AddConfigRequest{
+				Config: &aclpb.NamespaceConfig{},
+			},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "The 'config.name' field is required and cannot be empty."),
+			},
+		},
+		{
+			name:  "Test-5: Namespace AlreadyExists error",
+			input: validRequest,
+			output: output{
+				err: status.Error(codes.AlreadyExists, "the provided namespace already exists"),
+			},
+			mockController: func(nsmanager *MockNamespaceManager) {
+				nsmanager.EXPECT().AddConfig(gomock.Any(), validRequest.Config).Return(ErrNamespaceAlreadyExists)
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -878,11 +1257,11 @@ func TestAccessController_AddConfig(t *testing.T) {
 			response, err := controller.AddConfig(context.Background(), test.input)
 
 			if !errors.Is(err, test.output.err) {
-				t.Errorf("Expected error '%v', but got '%v'", err, test.output.err)
+				t.Errorf("Expected error '%v', but got '%v'", test.output.err, err)
 			}
 
 			if !proto.Equal(response, test.output.response) {
-				t.Errorf("Expected response '%v', but got '%v'", response, test.output.response)
+				t.Errorf("Expected response '%v', but got '%v'", test.output.response, response)
 			}
 		})
 	}
@@ -937,6 +1316,23 @@ func TestAccessController_ReadConfig(t *testing.T) {
 				nsmanager.EXPECT().GetConfig(gomock.Any(), validRequest.Namespace).Return(config1, nil)
 			},
 		},
+		{
+			name:  "Test-3: Empty 'namespace' field (InvalidInput)",
+			input: &aclpb.ReadConfigRequest{},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "The 'namespace' field is required and cannot be empty."),
+			},
+		},
+		{
+			name:  "Test-4: Namespace NotFound",
+			input: validRequest,
+			output: output{
+				err: status.Errorf(codes.NotFound, "The namespace '%s' does not exist. If it was recently added, please try again in a couple of minutes", validRequest.Namespace),
+			},
+			mockController: func(nsmanager *MockNamespaceManager) {
+				nsmanager.EXPECT().GetConfig(gomock.Any(), validRequest.Namespace).Return(nil, ErrNamespaceDoesntExist)
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -974,11 +1370,11 @@ func TestAccessController_ReadConfig(t *testing.T) {
 			response, err := controller.ReadConfig(context.Background(), test.input)
 
 			if !errors.Is(err, test.output.err) {
-				t.Errorf("Expected error '%v', but got '%v'", err, test.output.err)
+				t.Errorf("Expected error '%v', but got '%v'", test.output.err, err)
 			}
 
 			if !proto.Equal(response, test.output.response) {
-				t.Errorf("Expected response '%v', but got '%v'", response, test.output.response)
+				t.Errorf("Expected response '%v', but got '%v'", test.output.response, response)
 			}
 		})
 	}
@@ -1063,50 +1459,15 @@ func TestAccessController_WriteRelation(t *testing.T) {
 			response, err := controller.WriteRelation(context.Background(), test.input)
 
 			if !errors.Is(err, test.output.err) {
-				t.Errorf("Expected error '%v', but got '%v'", err, test.output.err)
+				t.Errorf("Expected error '%v', but got '%v'", test.output.err, err)
 			}
 
 			if !proto.Equal(response, test.output.response) {
-				t.Errorf("Expected response '%v', but got '%v'", response, test.output.response)
+				t.Errorf("Expected response '%v', but got '%v'", test.output.response, response)
 			}
 		})
 	}
 }
-
-// func TestAccessController_LocalStatePanic(t *testing.T) {
-// 	defer func() {
-// 		if r := recover(); r == nil {
-// 			t.Errorf("Expected the code to panic, but it didn't")
-// 		}
-// 	}()
-
-// 	ctrl := gomock.NewController(t)
-// 	defer ctrl.Finish()
-
-// 	mockNamespaceManager := NewMockNamespaceManager(ctrl)
-
-// 	mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-// 		changelog := []*NamespaceChangelogEntry{}
-// 		iter := NewMockChangelogIterator(changelog)
-// 		return iter, nil
-// 	})
-
-// 	opts := []AccessControllerOption{
-// 		WithNamespaceManager(mockNamespaceManager),
-// 	}
-
-// 	controller, err := NewAccessController(opts...)
-// 	if err != nil {
-// 		t.Fatalf("Failed to initialize the AccessController: %v", err)
-// 	}
-// 	defer func() {
-// 		if err := controller.Close(); err != nil {
-// 			t.Fatalf("Failed to close the controller: %v", err)
-// 		}
-// 	}()
-
-// 	controller.LocalState(false)
-// }
 
 func TestAccessController_LocalState(t *testing.T) {
 
@@ -1398,6 +1759,68 @@ func TestAccessController_NotifyLeave(t *testing.T) {
 			controller.NotifyLeave(test.member)
 		})
 	}
+}
+
+func TestAccessController_GetBroadcasts(t *testing.T) {
+
+	controller := &AccessController{}
+
+	if controller.GetBroadcasts(0, 0) != nil {
+		t.Error("Expected nil, but got non-nil")
+	}
+}
+
+func TestAccessController_watchNamespaceConfigs(t *testing.T) {
+
+	timestamp := time.Now()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockNamespaceManager := NewMockNamespaceManager(ctrl)
+	mockPeerStore := NewMockPeerNamespaceConfigStore(ctrl)
+
+	controller := &AccessController{
+		NodeConfigs: NodeConfigs{
+			ServerID: "server1",
+		},
+		NamespaceManager:         mockNamespaceManager,
+		PeerNamespaceConfigStore: mockPeerStore,
+		shutdown:                 make(chan struct{}),
+	}
+
+	mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), uint(3)).DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
+		changelog := []*NamespaceChangelogEntry{
+			{
+				Namespace: dirsConfig.Name,
+				Operation: AddNamespace,
+				Config:    dirsConfig,
+				Timestamp: timestamp,
+			},
+			{
+				Namespace: filesConfig.Name,
+				Operation: UpdateNamespace,
+				Config:    filesConfig,
+				Timestamp: timestamp,
+			},
+		}
+		iter := NewMockChangelogIterator(changelog)
+		return iter, nil
+	}).After(
+		mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), uint(3)).DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
+			return nil, fmt.Errorf("some database error")
+		}),
+	)
+
+	mockPeerStore.EXPECT().SetNamespaceConfigSnapshot(controller.ServerID, dirsConfig.Name, dirsConfig, timestamp).Return(nil)
+	mockPeerStore.EXPECT().SetNamespaceConfigSnapshot(controller.ServerID, filesConfig.Name, filesConfig, timestamp).DoAndReturn(
+		func(peerID, namespace string, config *aclpb.NamespaceConfig, ts time.Time) error {
+			controller.shutdown <- struct{}{}
+			return nil
+		},
+	)
+
+	controller.watchNamespaceConfigs(context.Background())
 }
 
 func TestAccessController_rewriteFromNamespaceConfig(t *testing.T) {
