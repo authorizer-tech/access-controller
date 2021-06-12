@@ -1,5 +1,5 @@
 image:
-  repository: gcr.io/jon-whit/authorizer-tech/access-controller
+  repository: gcr.io/authorizer-tech/access-controller
   pullPolicy: Always
   # Overrides the image tag whose default is the chart appVersion.
   tag: "latest"
