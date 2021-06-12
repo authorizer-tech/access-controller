@@ -127,7 +127,7 @@ var rewrite1 *aclpb.Rewrite = &aclpb.Rewrite{
 	},
 }
 
-var cfg *aclpb.NamespaceConfig = &aclpb.NamespaceConfig{
+var cfg1 *aclpb.NamespaceConfig = &aclpb.NamespaceConfig{
 	Name: "namespace1",
 	Relations: []*aclpb.Relation{
 		{
@@ -136,6 +136,23 @@ var cfg *aclpb.NamespaceConfig = &aclpb.NamespaceConfig{
 		{
 			Name:    "relation2",
 			Rewrite: rewrite1,
+		},
+	},
+}
+
+var cfg2 *aclpb.NamespaceConfig = &aclpb.NamespaceConfig{
+	Name: cfg1.Name,
+	Relations: []*aclpb.Relation{
+		{Name: "relationX"},
+	},
+}
+
+var defaultRewrite *aclpb.Rewrite = &aclpb.Rewrite{
+	RewriteOperation: &aclpb.Rewrite_Union{
+		Union: &aclpb.SetOperation{
+			Children: []*aclpb.SetOperation_Child{
+				{ChildType: &aclpb.SetOperation_Child_This_{}},
+			},
 		},
 	},
 }
@@ -149,23 +166,17 @@ func TestNamespaceManager(t *testing.T) {
 
 	// Add a new namespace configuration, and verify it by reading it
 	// back
-	err = m.AddConfig(context.Background(), cfg)
-	if err != nil && err != ac.ErrNamespaceAlreadyExists {
+	err = m.UpsertConfig(context.Background(), cfg1)
+	if err != nil {
 		t.Errorf("Expected nil error, but got '%v'", err)
 	}
 
-	config, err := m.GetConfig(context.Background(), cfg.Name)
+	config, err := m.GetConfig(context.Background(), cfg1.Name)
 	if err != nil {
 		t.Errorf("Expected nil error, but got  '%v'", err)
 	}
-	if !proto.Equal(cfg, config) {
-		t.Errorf("Expected '%v', but got '%v'", cfg, config)
-	}
-
-	// Try to add a namespace config for an existing namespace
-	err = m.AddConfig(context.Background(), cfg)
-	if err != ac.ErrNamespaceAlreadyExists {
-		t.Errorf("Expected '%s' error, but got '%v'", ac.ErrNamespaceAlreadyExists, err)
+	if !proto.Equal(cfg1, config) {
+		t.Errorf("Expected '%v', but got '%v'", cfg1, config)
 	}
 
 	// Attempt to get a namespace config for a namespace that doesn't exist, verify
@@ -179,7 +190,7 @@ func TestNamespaceManager(t *testing.T) {
 	}
 
 	// Verify the rewrite rule for 'relation2'
-	r1, err := m.GetRewrite(context.Background(), cfg.Name, "relation2")
+	r1, err := m.GetRewrite(context.Background(), cfg1.Name, "relation2")
 	if err != nil {
 		t.Errorf("Expected nil error, but got  '%v'", err)
 	}
@@ -188,73 +199,35 @@ func TestNamespaceManager(t *testing.T) {
 	}
 
 	// Verify the rewrite rule for 'relation1'
-	r2, err := m.GetRewrite(context.Background(), cfg.Name, "relation1")
+	r2, err := m.GetRewrite(context.Background(), cfg1.Name, "relation1")
 	if err != nil {
 		t.Errorf("Expected nil error, but got  '%v'", err)
 	}
 
-	rewrite2 := &aclpb.Rewrite{
-		RewriteOperation: &aclpb.Rewrite_Union{
-			Union: &aclpb.SetOperation{
-				Children: []*aclpb.SetOperation_Child{
-					{ChildType: &aclpb.SetOperation_Child_This_{}},
-				},
-			},
-		},
-	}
-	if !proto.Equal(r2, rewrite2) {
-		t.Errorf("Expected '%v', but got '%v'", rewrite2, r2)
+	if !proto.Equal(r2, defaultRewrite) {
+		t.Errorf("Expected '%v', but got '%v'", defaultRewrite, r2)
 	}
 
-	// Attempt to upsert a relation to a non-existing namespace
-	err = m.UpsertRelation(context.Background(), "missing-namespace", &aclpb.Relation{})
-	if err != ac.ErrNamespaceDoesntExist {
-		t.Errorf("Expected error '%v', but got '%v'", ac.ErrNamespaceDoesntExist, err)
-	}
-
-	// Add a new relation to the existing namespace, and verify by reading
-	// it back.
-	err = m.UpsertRelation(context.Background(), cfg.Name, &aclpb.Relation{
-		Name: "new-relation",
-	})
+	// Overwrite the namespace config, and verify it by reading it back
+	err = m.UpsertConfig(context.Background(), cfg2)
 	if err != nil {
 		t.Errorf("Expected nil error, but got '%v'", err)
 	}
 
-	rewrite, err := m.GetRewrite(context.Background(), cfg.Name, "new-relation")
+	config, err = m.GetConfig(context.Background(), cfg2.Name)
+	if err != nil {
+		t.Errorf("Expected nil error, but got  '%v'", err)
+	}
+	if !proto.Equal(cfg2, config) {
+		t.Errorf("Expected '%v', but got '%v'", cfg1, config)
+	}
+
+	rewrite, err := m.GetRewrite(context.Background(), cfg2.Name, "relationX")
 	if err != nil {
 		t.Errorf("Expected nil error, but got '%v'", err)
 	}
-
-	expectedRewrite := &aclpb.Rewrite{
-		RewriteOperation: &aclpb.Rewrite_Union{
-			Union: &aclpb.SetOperation{
-				Children: []*aclpb.SetOperation_Child{
-					{ChildType: &aclpb.SetOperation_Child_This_{}},
-				},
-			},
-		},
-	}
-
-	if !proto.Equal(rewrite, expectedRewrite) {
-		t.Errorf("Expected rewrite '%v', but got '%v'", expectedRewrite, rewrite)
-	}
-
-	// Overwrite the 'new-relation' rewrite rule, and verify it by reading it back
-	err = m.UpsertRelation(context.Background(), cfg.Name, &aclpb.Relation{
-		Name:    "new-relation",
-		Rewrite: rewrite1,
-	})
-	if err != nil {
-		t.Errorf("Expected nil error, but got '%v'", err)
-	}
-
-	rewrite, err = m.GetRewrite(context.Background(), cfg.Name, "new-relation")
-	if err != nil {
-		t.Errorf("Expected nil error, but got '%v'", err)
-	}
-	if !proto.Equal(rewrite, rewrite1) {
-		t.Errorf("Expected rewrite '%v', but got '%v'", expectedRewrite, rewrite)
+	if !proto.Equal(rewrite, defaultRewrite) {
+		t.Errorf("Expected rewrite '%v', but got '%v'", defaultRewrite, rewrite)
 	}
 
 	// Fetch (at most) the top 4 most recent namespace config changelog entries
@@ -278,29 +251,23 @@ func TestNamespaceManager(t *testing.T) {
 		t.Fatalf("Failed to close the Changelog iterator: %v", err)
 	}
 
-	if len(changelog) != 3 {
-		t.Errorf("Expected 3 changelog entries, but got '%d'", len(changelog))
+	if len(changelog) != 2 {
+		t.Errorf("Expected 2 changelog entries, but got '%d'", len(changelog))
 	}
 
 	// changelog entries are sorted in timestamp acending order (least recent first)
 	expected := []*ac.NamespaceChangelogEntry{
 		{
-			Namespace: cfg.Name,
+			Namespace: cfg1.Name,
 			Operation: ac.AddNamespace,
 			Config:    changelog[0].Config, // todo: assert the correct value here too
 			Timestamp: changelog[0].Timestamp,
 		},
 		{
-			Namespace: cfg.Name,
+			Namespace: cfg2.Name,
 			Operation: ac.UpdateNamespace,
 			Config:    changelog[1].Config, // todo: assert the correct value here too
 			Timestamp: changelog[1].Timestamp,
-		},
-		{
-			Namespace: cfg.Name,
-			Operation: ac.UpdateNamespace,
-			Config:    changelog[2].Config, // todo: assert the correct value here too
-			Timestamp: changelog[2].Timestamp,
 		},
 	}
 
