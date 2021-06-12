@@ -27,9 +27,13 @@ const (
 	// for a namespace that doesn't exist.
 	NamespaceDoesntExist
 
-	// NamespaceRelationUndefined is an error that occurs when referencing an undefined relation
+	// NamespaceRelationUndefined is an error that occurrs when referencing an undefined relation
 	// in a namespace config.
 	NamespaceRelationUndefined
+
+	// NamespaceUpdateFailedPrecondition is an error that occurrs when an update to a namespace config
+	// fails precondition checks.
+	NamespaceUpdateFailedPrecondition
 )
 
 // NamespaceConfigError represents an error type that is surfaced when Namespace Config
@@ -47,16 +51,12 @@ func (e NamespaceConfigError) Error() string {
 // ToStatus returns the namespace config error as a grpc status.
 func (e NamespaceConfigError) ToStatus() *status.Status {
 	switch e.Type {
-	case NamespaceDoesntExist:
+	case NamespaceDoesntExist, NamespaceUpdateFailedPrecondition, NamespaceRelationUndefined:
 		return status.New(codes.InvalidArgument, e.Message)
 	default:
 		return status.New(codes.Unknown, e.Message)
 	}
 }
-
-// ErrNamespaceAlreadyExists is an error that occurrs when attempting to add a namespace config
-// for a namespace that has been previously added.
-var ErrNamespaceAlreadyExists error = errors.New("the provided namespace already exists")
 
 // ErrNamespaceDoesntExist is an error that occurrs when attempting to fetch a namespace config
 // for a namespace that doesn't exist.
@@ -125,16 +125,12 @@ type NamespaceChangelogEntry struct {
 // NamespaceManager defines an interface to manage/administer namespace configs.
 type NamespaceManager interface {
 
-	// AddConfig appends the provided namespace configuration along with a timestamp
+	// UpsertConfig upserts the provided namespace configuration along with a timestamp
 	// capturing the time at which the txn was committed.
-	AddConfig(ctx context.Context, cfg *aclpb.NamespaceConfig) error
+	UpsertConfig(ctx context.Context, cfg *aclpb.NamespaceConfig) error
 
 	// GetConfig fetches the latest namespace config.
 	GetConfig(ctx context.Context, namespace string) (*aclpb.NamespaceConfig, error)
-
-	// UpsertRelation upserts the given relation under the namespace config provided. This
-	// creates a new namespace config snapshot for the namespace.
-	UpsertRelation(ctx context.Context, namespace string, relation *aclpb.Relation) error
 
 	// GetRewrite fetches the rewrite rule for the given (namespace, relation) tuple using
 	// the latest namespace config available.
@@ -146,6 +142,17 @@ type NamespaceManager interface {
 	// number of snapshots. This yields an iterator that will iterate over at most M * n
 	// values. If n >= X, then the iterator will iterate over at most M * X values.
 	TopChanges(ctx context.Context, n uint) (ChangelogIterator, error)
+
+	// LookupRelationReferencesByCount does a reverse lookup by the (namespace, relation...) pairs
+	// and returns a map whose keys are the relations and whose values indicate the number of relation
+	// tuples that reference the (namespace, relation) pair. If a (namespace, relation) pair is not
+	// referenced at all, it's key is omitted in the output map.
+	LookupRelationReferencesByCount(ctx context.Context, namespace string, relations ...string) (map[string]int, error)
+
+	// WrapTransaction wraps the provided fn in a single transaction using the context.
+	// If fn returns an error the transaction is rolled back and aborted. Otherwise it
+	// is committed.
+	WrapTransaction(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
 // PeerNamespaceConfigStore defines the interface to store the namespace config snapshots

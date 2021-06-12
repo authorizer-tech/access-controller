@@ -407,7 +407,15 @@ func TestNamespaceConfigError_ToStatus(t *testing.T) {
 				Message: "some error",
 				Type:    NamespaceRelationUndefined,
 			},
-			output: status.New(codes.Unknown, "some error"),
+			output: status.New(codes.InvalidArgument, "some error"),
+		},
+		{
+			name: "Test-4",
+			input: NamespaceConfigError{
+				Message: "some error",
+				Type:    NamespaceUpdateFailedPrecondition,
+			},
+			output: status.New(codes.InvalidArgument, "some error"),
 		},
 	}
 

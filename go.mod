@@ -5,6 +5,7 @@ go 1.15
 require (
 	github.com/bufbuild/buf v0.42.1
 	github.com/buraksezer/consistent v0.0.0-20191006190839-693edf70fd72
+	github.com/cenkalti/backoff/v4 v4.1.1
 	github.com/cespare/xxhash v1.1.0
 	github.com/doug-martin/goqu/v9 v9.10.0
 	github.com/golang-migrate/migrate/v4 v4.14.1

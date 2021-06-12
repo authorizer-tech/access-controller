@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/hashicorp/memberlist"
 	"github.com/pkg/errors"
 
@@ -19,6 +20,11 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
+)
+
+var (
+	internalErrorMessage = "An internal error has occurred. Please try again shortly."
+	internalErrorStatus  = status.Error(codes.Internal, internalErrorMessage)
 )
 
 type AccessController struct {
@@ -68,20 +74,31 @@ func WithNodeConfigs(cfg NodeConfigs) AccessControllerOption {
 // to this node in an in-memory namespace config store.
 func (a *AccessController) watchNamespaceConfigs(ctx context.Context) {
 
+	backoffPolicy := backoff.NewExponentialBackOff()
+	backoffPolicy.MaxElapsedTime = 90 * time.Second
+
 	go func() {
 		for {
 
-			// Watch the top 3 most recent changes per namespace.
-			//
-			// The assumption here is that each peer/node of the cluster should
-			// have enough time to have processed one of the last three changes per
-			// namespace. At a later date we'll capture metrics around this to quantify
-			// a more accurate threshold based on quantitative analysis from running in
-			// production.
-			iter, err := a.NamespaceManager.TopChanges(context.Background(), 3)
+			var iter ChangelogIterator
+			var err error
+
+			err = backoff.Retry(func() error {
+
+				// Watch the top 3 most recent changes per namespace.
+				//
+				// The assumption here is that each peer/node of the cluster should
+				// have enough time to have processed one of the last three changes per
+				// namespace. At a later date we'll capture metrics around this to quantify
+				// a more accurate threshold based on quantitative analysis from running in
+				// production.
+				iter, err = a.NamespaceManager.TopChanges(context.Background(), 3)
+				if err != nil {
+					log.Error(err)
+				}
+				return err
+			}, backoffPolicy)
 			if err != nil {
-				// todo: handle this more gracefully.. we'll slam the database continuously right
-				// now if we experience errors back to back in a short interval of time.
 				log.Errorf("Failed to list top namespace config changes: %v", err)
 				continue
 			}
@@ -292,7 +309,7 @@ func (a *AccessController) checkLeaf(ctx context.Context, op *aclpb.SetOperation
 		}
 		count, err := a.RelationTupleStore.RowCount(ctx, query)
 		if err != nil {
-			return false, err
+			return false, internalErrorStatus
 		}
 
 		if count > 0 {
@@ -300,10 +317,10 @@ func (a *AccessController) checkLeaf(ctx context.Context, op *aclpb.SetOperation
 		}
 
 		// compute indirect ACLs referenced by subject sets from the tuples
-		// SELECT * FROM namespace WHERE relation=<rewrite.relation> AND subject LIKE '_%%:_%%#_%%'
+		// SELECT * FROM <namespace> WHERE relation=<relation> AND subject LIKE '_%%:_%%#_%%'
 		subjects, err := a.RelationTupleStore.SubjectSets(ctx, obj, relation)
 		if err != nil {
-			return false, err
+			return false, internalErrorStatus
 		}
 
 		// todo: these checks could be done concurrently to optimize check performance
@@ -331,7 +348,7 @@ func (a *AccessController) checkLeaf(ctx context.Context, op *aclpb.SetOperation
 
 		subjects, err := a.RelationTupleStore.SubjectSets(ctx, obj, rewrite.TupleToSubjectset.GetTupleset().GetRelation())
 		if err != nil {
-			return false, err
+			return false, internalErrorStatus
 		}
 
 		for _, subject := range subjects {
@@ -475,14 +492,34 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 				return false, NamespaceConfigError{
 					Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
 					Type:    NamespaceDoesntExist,
-				}
+				}.ToStatus().Err()
 			}
-			return false, err
+
+			return false, internalErrorStatus
 		}
 
 		snapshotTimestamp = snapshot.Timestamp
+
+		ctx = NewContextWithNamespaceConfigTimestamp(ctx, snapshotTimestamp)
 	} else {
 		snapshotTimestamp = peerNamespaceCfgTs
+	}
+
+	cfg, err := a.PeerNamespaceConfigStore.GetNamespaceConfigSnapshot(a.ServerID, namespace, snapshotTimestamp)
+	if err != nil {
+		return false, internalErrorStatus
+	}
+
+	if cfg == nil {
+		return false, NamespaceConfigError{
+			Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
+			Type:    NamespaceDoesntExist,
+		}.ToStatus().Err()
+	}
+
+	rewrite := rewriteFromNamespaceConfig(relation, cfg)
+	if rewrite == nil {
+		return false, nil
 	}
 
 	forwardingNodeID := a.Hashring.LocateKey([]byte(object)).String()
@@ -492,18 +529,17 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 
 		c, err := a.RPCRouter.GetClient(forwardingNodeID)
 		if err != nil {
-			return false, fmt.Errorf("failed to acquire the RPC client for the peer with ID '%s'", forwardingNodeID)
+			log.Errorf("Failed to acquire the RPC client for the peer with ID '%s'", forwardingNodeID)
+			return false, internalErrorStatus
 		}
 
 		client, ok := c.(aclpb.CheckServiceClient)
 		if !ok {
-			// todo: is panic'ing the right approach here? The value should
-			// always be a CheckServiceClient, and if not there's a bug.
-			panic("unexpected RPC client type encountered")
+			// if this branch is hit there is a serious bug.
+			panic("unexpected rpc client type encountered")
 		}
 
-		modifiedCtx := context.WithValue(ctx, hashringChecksumKey, a.Hashring.Checksum())
-		modifiedCtx = context.WithValue(modifiedCtx, nsConfigSnapshotTimestampKey, snapshotTimestamp)
+		ctx = NewContextWithChecksum(ctx, a.Hashring.Checksum())
 
 		subject := SubjectID{ID: subject}
 
@@ -515,7 +551,7 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 		}
 
 		var resp *aclpb.CheckResponse
-		resp, err = client.Check(modifiedCtx, req)
+		resp, err = client.Check(ctx, req)
 
 		for retries := 0; err != nil && status.Code(err) != codes.Canceled; retries++ {
 			log.Tracef("Check proxy RPC failed with error: %v. Retrying..", err)
@@ -543,10 +579,7 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 				panic("unexpected RPC client type encountered")
 			}
 
-			modifiedCtx := context.WithValue(ctx, hashringChecksumKey, a.Hashring.Checksum())
-			modifiedCtx = context.WithValue(modifiedCtx, nsConfigSnapshotTimestampKey, snapshotTimestamp)
-
-			resp, err = client.Check(modifiedCtx, req)
+			resp, err = client.Check(ctx, req)
 		}
 
 		if resp != nil {
@@ -555,25 +588,6 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 	}
 
 EVAL:
-
-	cfg, err := a.PeerNamespaceConfigStore.GetNamespaceConfigSnapshot(a.ServerID, namespace, snapshotTimestamp)
-	if err != nil {
-		return false, err
-	}
-
-	if cfg == nil {
-		return false, NamespaceConfigError{
-			Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
-			Type:    NamespaceDoesntExist,
-		}.ToStatus().Err()
-	}
-
-	rewrite := rewriteFromNamespaceConfig(relation, cfg)
-	if rewrite == nil {
-		message := fmt.Sprintf("No rewrite snapshot for relation '%s#%s' exists at timestamp '%s'", namespace, relation, snapshotTimestamp)
-		return false, status.Error(codes.InvalidArgument, message)
-	}
-
 	return a.checkRewrite(ctx, rewrite, namespace, object, relation, subject)
 }
 
@@ -616,7 +630,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 					Relations: []string{relation},
 				}, &fieldmaskpb.FieldMask{})
 				if err != nil {
-					return nil, err
+					return nil, internalErrorStatus
 				}
 
 				for _, tuple := range tuples {
@@ -633,7 +647,9 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 							return nil, err
 						}
 
-						tree.Children = append(tree.Children, t)
+						if t != nil {
+							tree.Children = append(tree.Children, t)
+						}
 					} else {
 						tree.Children = append(tree.Children, &SubjectTree{
 							Type:    LeafNode,
@@ -647,7 +663,9 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 					return nil, err
 				}
 
-				tree.Children = append(tree.Children, t)
+				if t != nil {
+					tree.Children = append(tree.Children, t)
+				}
 			case *aclpb.SetOperation_Child_TupleToSubjectset:
 
 				rr := so.TupleToSubjectset.GetTupleset().GetRelation()
@@ -661,7 +679,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 					Relations: []string{rr},
 				}, &fieldmaskpb.FieldMask{})
 				if err != nil {
-					return nil, err
+					return nil, internalErrorStatus
 				}
 
 				for _, tuple := range tuples {
@@ -678,7 +696,9 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 							return nil, err
 						}
 
-						tree.Children = append(tree.Children, t)
+						if t != nil {
+							tree.Children = append(tree.Children, t)
+						}
 					} else {
 						tree.Children = append(tree.Children, &SubjectTree{
 							Type:    LeafNode,
@@ -704,12 +724,7 @@ func (a *AccessController) expand(ctx context.Context, namespace, object, relati
 			}.ToStatus().Err()
 		}
 
-		return nil, err
-	}
-
-	rewrite := rewriteFromNamespaceConfig(relation, configSnapshot.Config)
-	if rewrite == nil {
-		return nil, fmt.Errorf("relation '%s' is undefined in namespace '%s' at snapshot config timestamp '%s'", relation, namespace, configSnapshot.Timestamp)
+		return nil, internalErrorStatus
 	}
 
 	tree := &SubjectTree{
@@ -719,6 +734,14 @@ func (a *AccessController) expand(ctx context.Context, namespace, object, relati
 			Relation:  relation,
 		},
 	}
+
+	rewrite := rewriteFromNamespaceConfig(relation, configSnapshot.Config)
+	if rewrite == nil {
+		return nil, nil
+	}
+
+	ctx = NewContextWithNamespaceConfigTimestamp(ctx, configSnapshot.Timestamp)
+
 	return a.expandWithRewrite(ctx, rewrite, tree, namespace, object, relation, depth)
 }
 
@@ -777,7 +800,7 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 			rewrite := rewriteFromNamespaceConfig(relation, configSnapshot.Config)
 			if rewrite == nil {
 				return nil, NamespaceConfigError{
-					Message: fmt.Sprintf("'%s' relation is undefined in namespace '%s' at snapshot config timestamp '%s'", relation, namespace, configSnapshot.Timestamp),
+					Message: fmt.Sprintf("'%s' relation is undefined in namespace '%s' at snapshot config timestamp '%s'. If this relation was recently added, please try again in a couple minutes", relation, namespace, configSnapshot.Timestamp),
 					Type:    NamespaceRelationUndefined,
 				}.ToStatus().Err()
 			}
@@ -789,10 +812,14 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 
 				configSnapshot, err := a.chooseNamespaceConfigSnapshot(n)
 				if err != nil {
-					return nil, NamespaceConfigError{
-						Message: fmt.Sprintf("SubjectSet '%s' references the '%s' namespace which is undefined. If this namespace was recently added, please try again in a couple minutes", subject.String(), n),
-						Type:    NamespaceDoesntExist,
-					}.ToStatus().Err()
+					if err == ErrNoLocalNamespacesDefined {
+						return nil, NamespaceConfigError{
+							Message: fmt.Sprintf("SubjectSet '%s' references the '%s' namespace which is undefined. If this namespace was recently added, please try again in a couple minutes", subject.String(), n),
+							Type:    NamespaceDoesntExist,
+						}.ToStatus().Err()
+					}
+
+					return nil, internalErrorStatus
 				}
 
 				rewrite := rewriteFromNamespaceConfig(r, configSnapshot.Config)
@@ -811,7 +838,9 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 	}
 
 	if err := a.RelationTupleStore.TransactRelationTuples(ctx, inserts, deletes); err != nil {
-		return nil, err
+		log.Errorf("TransactRelationTuples failed with error: %v", err)
+
+		return nil, internalErrorStatus
 	}
 
 	return &aclpb.WriteRelationTuplesTxnResponse{}, nil
@@ -822,9 +851,20 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 // returned.
 func (a *AccessController) ListRelationTuples(ctx context.Context, req *aclpb.ListRelationTuplesRequest) (*aclpb.ListRelationTuplesResponse, error) {
 
+	namespace := req.GetQuery().GetNamespace()
+	_, err := a.chooseNamespaceConfigSnapshot(namespace)
+	if err != nil {
+		return nil, NamespaceConfigError{
+			Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
+			Type:    NamespaceDoesntExist,
+		}.ToStatus().Err()
+	}
+
 	tuples, err := a.RelationTupleStore.ListRelationTuples(ctx, req.GetQuery(), req.GetExpandMask())
 	if err != nil {
-		return nil, err
+		log.Errorf("ListRelationTuples failed with error: %v", err)
+
+		return nil, internalErrorStatus
 	}
 
 	protoTuples := []*aclpb.RelationTuple{}
@@ -839,6 +879,8 @@ func (a *AccessController) ListRelationTuples(ctx context.Context, req *aclpb.Li
 	return &response, nil
 }
 
+// Expand expands the provided SubjectSet by traversing all of the subject's (including indirect relations and
+// those contributed through rewrites) that have the given relation to the (namespace, object) pair.
 func (a *AccessController) Expand(ctx context.Context, req *aclpb.ExpandRequest) (*aclpb.ExpandResponse, error) {
 
 	subject := req.GetSubjectSet()
@@ -851,34 +893,101 @@ func (a *AccessController) Expand(ctx context.Context, req *aclpb.ExpandRequest)
 		return nil, err
 	}
 
+	var subjectTree *aclpb.SubjectTree
+	if tree != nil {
+		subjectTree = tree.ToProto()
+	}
+
 	resp := &aclpb.ExpandResponse{
-		Tree: tree.ToProto(),
+		Tree: subjectTree,
 	}
 
 	return resp, nil
 }
 
-// AddConfig adds a new namespace configuration. If the namespace already exists, an error is returned.
-func (a *AccessController) AddConfig(ctx context.Context, req *aclpb.AddConfigRequest) (*aclpb.AddConfigResponse, error) {
+// WriteConfig upserts the provided namespace configuration. Removing an existing relation that has
+// one or more relation tuples referencing it will lead to an error.
+func (a *AccessController) WriteConfig(ctx context.Context, req *aclpb.WriteConfigRequest) (*aclpb.WriteConfigResponse, error) {
 
-	if req.GetConfig() == nil {
+	config := req.GetConfig()
+	if config == nil {
 		return nil, status.Error(codes.InvalidArgument, "The 'config' field is required and cannot be nil.")
 	}
 
-	if req.GetConfig().GetName() == "" {
+	namespace := config.GetName()
+	if namespace == "" {
 		return nil, status.Error(codes.InvalidArgument, "The 'config.name' field is required and cannot be empty.")
 	}
 
-	err := a.NamespaceManager.AddConfig(ctx, req.GetConfig())
-	if err != nil {
-		if err == ErrNamespaceAlreadyExists {
-			return nil, status.Error(codes.AlreadyExists, err.Error())
-		}
+	relations := config.GetRelations()
 
-		return nil, err
+	proposedRelationsMap := map[string]struct{}{}
+	for _, relation := range relations {
+		proposedRelationsMap[relation.GetName()] = struct{}{}
 	}
 
-	return &(aclpb.AddConfigResponse{}), nil
+	for _, relation := range relations {
+
+		rewrite := rewriteFromNamespaceConfig(relation.GetName(), config)
+		if err := validateRewriteRelations(proposedRelationsMap, rewrite); err != nil {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+	}
+
+	err := a.NamespaceManager.WrapTransaction(ctx, func(txnCtx context.Context) error {
+		currentConfig, err := a.NamespaceManager.GetConfig(txnCtx, namespace)
+		if err != nil {
+			if err == ErrNamespaceDoesntExist {
+				return a.NamespaceManager.UpsertConfig(txnCtx, config)
+			}
+
+			return err
+		}
+
+		currentRelationsMap := map[string]struct{}{}
+		for _, relation := range currentConfig.GetRelations() {
+			currentRelationsMap[relation.GetName()] = struct{}{}
+		}
+
+		removedRelations := []string{}
+		for relationName := range currentRelationsMap {
+			if _, ok := proposedRelationsMap[relationName]; !ok {
+				removedRelations = append(removedRelations, relationName)
+			}
+		}
+
+		if len(removedRelations) > 0 {
+
+			references, err := a.NamespaceManager.LookupRelationReferencesByCount(txnCtx, namespace, removedRelations...)
+			if err != nil {
+				return err
+			}
+
+			if len(references) > 0 {
+				relations := []string{}
+				for relation := range references {
+					relations = append(relations, relation)
+				}
+
+				return NamespaceConfigError{
+					Message: fmt.Sprintf("Relation(s) [%v] cannot be removed while one or more relation tuples reference them. Please migrate all relation tuples before removing a relation.", strings.Join(relations, ",")),
+					Type:    NamespaceUpdateFailedPrecondition,
+				}
+			}
+		}
+
+		return a.NamespaceManager.UpsertConfig(txnCtx, config)
+	})
+	if err != nil {
+		err, ok := err.(NamespaceConfigError)
+		if ok {
+			return nil, err.ToStatus().Err()
+		}
+
+		return nil, internalErrorStatus
+	}
+
+	return &(aclpb.WriteConfigResponse{}), nil
 }
 
 // ReadConfig fetches the namespace configuration for the provided namespace. If the namespace
@@ -892,10 +1001,10 @@ func (a *AccessController) ReadConfig(ctx context.Context, req *aclpb.ReadConfig
 
 	config, err := a.NamespaceManager.GetConfig(ctx, namespace)
 	if err != nil {
-		if err == ErrNamespaceDoesntExist {
+		if errors.Is(err, ErrNamespaceDoesntExist) {
 			return nil, status.Errorf(codes.NotFound, "The namespace '%s' does not exist. If it was recently added, please try again in a couple of minutes", namespace)
 		}
-		return nil, err
+		return nil, internalErrorStatus
 	}
 
 	resp := &aclpb.ReadConfigResponse{
@@ -904,34 +1013,6 @@ func (a *AccessController) ReadConfig(ctx context.Context, req *aclpb.ReadConfig
 	}
 
 	return resp, nil
-}
-
-// WriteRelation upserts the namespace relation to the provided namespace config. If the namespace
-// does not exist, an error is returned.
-func (a *AccessController) WriteRelation(ctx context.Context, req *aclpb.WriteRelationRequest) (*aclpb.WriteRelationResponse, error) {
-
-	namespace := req.GetNamespace()
-	if namespace == "" {
-		return nil, status.Error(codes.InvalidArgument, "The 'namespace' field is required and cannot be empty.")
-	}
-
-	if req.Relation == nil {
-		return nil, status.Error(codes.InvalidArgument, "The 'relation' field must be set. It cannot be nil.")
-	}
-
-	if req.GetRelation().GetName() == "" {
-		return nil, status.Error(codes.InvalidArgument, "The 'relation.name' field must be set. It cannot be empty.")
-	}
-
-	err := a.NamespaceManager.UpsertRelation(ctx, namespace, req.GetRelation())
-	if err != nil {
-		if err == ErrNamespaceDoesntExist {
-			return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("Namespace '%s' doesn't exist. Please add it first.", namespace))
-		}
-		return nil, err
-	}
-
-	return &(aclpb.WriteRelationResponse{}), nil
 }
 
 // NodeMeta is used to retrieve meta-data about the current node
@@ -1133,6 +1214,53 @@ func rewriteFromNamespaceConfig(relation string, config *aclpb.NamespaceConfig) 
 			}
 
 			return rewrite
+		}
+	}
+
+	return nil
+}
+
+// validateRewriteRelations validates the relations in the provided rewrite rule reference those
+// specified in the definedRelations. If a relation in the rewrite rule references a undefined
+// relation, an error is returned.
+func validateRewriteRelations(definedRelations map[string]struct{}, rewrite *aclpb.Rewrite) error {
+
+	op := rewrite.GetRewriteOperation()
+
+	var children []*aclpb.SetOperation_Child
+	switch o := op.(type) {
+	case *aclpb.Rewrite_Intersection:
+		children = o.Intersection.GetChildren()
+	case *aclpb.Rewrite_Union:
+		children = o.Union.GetChildren()
+	default:
+		panic("Unexpected rewrite operation encountered")
+	}
+
+	for _, child := range children {
+		rewr := child.GetRewrite()
+		if rewr != nil {
+			return validateRewriteRelations(definedRelations, rewr)
+		} else {
+			setOperation := child.GetChildType()
+			switch so := setOperation.(type) {
+			case *aclpb.SetOperation_Child_This_:
+				continue
+			case *aclpb.SetOperation_Child_ComputedSubjectset:
+				relation := so.ComputedSubjectset.GetRelation()
+
+				if _, ok := definedRelations[relation]; !ok {
+					return fmt.Errorf("'%s' relation is referenced but undefined in the provided namespace config", relation)
+				}
+			case *aclpb.SetOperation_Child_TupleToSubjectset:
+				relation := so.TupleToSubjectset.Tupleset.Relation
+
+				if _, ok := definedRelations[relation]; !ok {
+					return fmt.Errorf("'%s' relation is referenced but undefined in the provided namespace config", relation)
+				}
+			default:
+				panic("Unexpected rewrite set operation type")
+			}
 		}
 	}
 

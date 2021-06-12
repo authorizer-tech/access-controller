@@ -20,3 +20,10 @@ CREATE TABLE IF NOT EXISTS "changelog" (
     "timestamp" timestamp with time zone NOT NULL,
     PRIMARY KEY (namespace, operation, relationtuple, "timestamp")
 );
+
+CREATE TABLE IF NOT EXISTS "namespace-relation-lookup" (
+    namespace text NOT NULL,
+    relation text NOT NULL,
+    relationtuple text NOT NULL,
+    PRIMARY KEY (namespace, relation, relationtuple)
+);

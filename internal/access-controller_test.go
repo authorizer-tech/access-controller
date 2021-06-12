@@ -477,7 +477,7 @@ func TestAccessController_Check(t *testing.T) {
 				},
 			},
 			output: output{
-				err: dbError,
+				err: internalErrorStatus,
 			},
 			mockController: func(mstore *MockRelationTupleStore) {
 				mstore.EXPECT().RowCount(gomock.Any(), gomock.Any()).Return(int64(-1), dbError)
@@ -664,7 +664,7 @@ func TestAccessController_Check(t *testing.T) {
 				err: NamespaceConfigError{
 					Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", "undefined"),
 					Type:    NamespaceDoesntExist,
-				},
+				}.ToStatus().Err(),
 			},
 		},
 	}
@@ -876,7 +876,7 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 			},
 			output: output{
 				err: NamespaceConfigError{
-					Message: fmt.Sprintf("'%s' relation is undefined in namespace '%s' at snapshot config timestamp '%s'", "relation2", namespace1Config.Name, timestamp1.Round(0).UTC()),
+					Message: fmt.Sprintf("'%s' relation is undefined in namespace '%s' at snapshot config timestamp '%s'. If this relation was recently added, please try again in a couple minutes", "relation2", namespace1Config.Name, timestamp1.Round(0).UTC()),
 					Type:    NamespaceRelationUndefined,
 				}.ToStatus().Err(),
 			},
@@ -1043,14 +1043,39 @@ func TestAccessController_ListRelationTuples(t *testing.T) {
 		mockController func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager)
 	}{
 		{
-			name:  "Store Error",
-			input: &aclpb.ListRelationTuplesRequest{},
+			name: "Undefined Namespace (InvalidArgument)",
+			input: &aclpb.ListRelationTuplesRequest{
+				Query: &aclpb.ListRelationTuplesRequest_Query{Namespace: "undefined"},
+			},
 			output: output{
-				err: dbError,
+				err: status.Error(codes.InvalidArgument, "'undefined' namespace is undefined. If you recently added it, it may take a couple minutes to propagate"),
 			},
 			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
 				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
 					changelog := []*NamespaceChangelogEntry{}
+					iter := NewMockChangelogIterator(changelog)
+					return iter, nil
+				})
+			},
+		},
+		{
+			name: "Store Error",
+			input: &aclpb.ListRelationTuplesRequest{
+				Query: &aclpb.ListRelationTuplesRequest_Query{Namespace: "namespace1"},
+			},
+			output: output{
+				err: internalErrorStatus,
+			},
+			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
+				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
+					changelog := []*NamespaceChangelogEntry{
+						{
+							Namespace: namespace1Config.Name,
+							Operation: AddNamespace,
+							Config:    namespace1Config,
+							Timestamp: time.Now(),
+						},
+					}
 					iter := NewMockChangelogIterator(changelog)
 					return iter, nil
 				})
@@ -1059,8 +1084,10 @@ func TestAccessController_ListRelationTuples(t *testing.T) {
 			},
 		},
 		{
-			name:  "Successful Response",
-			input: &aclpb.ListRelationTuplesRequest{},
+			name: "Successful Response",
+			input: &aclpb.ListRelationTuplesRequest{
+				Query: &aclpb.ListRelationTuplesRequest_Query{Namespace: "namespace1"},
+			},
 			output: output{
 				response: &aclpb.ListRelationTuplesResponse{
 					RelationTuples: []*aclpb.RelationTuple{
@@ -1081,7 +1108,14 @@ func TestAccessController_ListRelationTuples(t *testing.T) {
 			},
 			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
 				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-					changelog := []*NamespaceChangelogEntry{}
+					changelog := []*NamespaceChangelogEntry{
+						{
+							Namespace: namespace1Config.Name,
+							Operation: AddNamespace,
+							Config:    namespace1Config,
+							Timestamp: time.Now(),
+						},
+					}
 					iter := NewMockChangelogIterator(changelog)
 					return iter, nil
 				})
@@ -1138,22 +1172,31 @@ func TestAccessController_ListRelationTuples(t *testing.T) {
 			response, err := controller.ListRelationTuples(context.Background(), test.input)
 
 			if !errors.Is(err, test.output.err) {
-				t.Errorf("Expected error '%v', but got '%v'", err, test.output.err)
+				t.Errorf("Expected error '%v', but got '%v'", test.output.err, err)
 			}
 
 			if !proto.Equal(response, test.output.response) {
-				t.Errorf("Expected response '%v', but got '%v'", response, test.output.response)
+				t.Errorf("Expected response '%v', but got '%v'", test.output.response, response)
 			}
 		})
 	}
 }
 
-func TestAccessController_AddConfig(t *testing.T) {
+func TestAccessController_WriteConfig(t *testing.T) {
+
+	type input struct {
+		ctx     context.Context
+		request *aclpb.WriteConfigRequest
+	}
 
 	type output struct {
-		response *aclpb.AddConfigResponse
+		response *aclpb.WriteConfigResponse
 		err      error
 	}
+
+	ctx1 := context.Background()
+
+	var wrapTxnFuncType = reflect.TypeOf((func(context.Context) error)(nil))
 
 	dbError := errors.New("db error")
 
@@ -1164,60 +1207,104 @@ func TestAccessController_AddConfig(t *testing.T) {
 		},
 	}
 
-	validRequest := &aclpb.AddConfigRequest{
+	validRequest := &aclpb.WriteConfigRequest{
 		Config: config1,
 	}
 
 	tests := []struct {
-		name  string
-		input *aclpb.AddConfigRequest
+		name string
+		input
 		output
 		mockController func(nsmanager *MockNamespaceManager)
 	}{
 		{
-			name:  "Test-1: Database Error",
-			input: validRequest,
+			name: "Test-1: Database Error",
+			input: input{
+				request: validRequest,
+			},
 			output: output{
-				err: dbError,
+				err: internalErrorStatus,
 			},
 			mockController: func(nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().AddConfig(gomock.Any(), validRequest.Config).Return(dbError)
+
+				gomock.InOrder(
+					nsmanager.EXPECT().WrapTransaction(gomock.Any(), gomock.AssignableToTypeOf(wrapTxnFuncType)).DoAndReturn(func(ctx context.Context, fn func(ctx context.Context) error) error {
+						return fn(ctx)
+					}),
+					nsmanager.EXPECT().GetConfig(gomock.Any(), validRequest.Config.Name).Return(nil, dbError),
+				)
 			},
 		},
 		{
-			name:  "Test-2: Successful Get",
-			input: validRequest,
+			name: "Test-2: Successful Upsert",
+			input: input{
+				ctx:     ctx1,
+				request: validRequest,
+			},
 			output: output{
-				response: &aclpb.AddConfigResponse{},
+				response: &aclpb.WriteConfigResponse{},
 			},
 			mockController: func(nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().AddConfig(gomock.Any(), validRequest.Config).Return(nil)
+
+				gomock.InOrder(
+					nsmanager.EXPECT().WrapTransaction(ctx1, gomock.AssignableToTypeOf(wrapTxnFuncType)).DoAndReturn(func(ctx context.Context, fn func(ctx context.Context) error) error {
+						return fn(ctx)
+					}),
+					nsmanager.EXPECT().GetConfig(ctx1, validRequest.Config.Name).Return(&aclpb.NamespaceConfig{
+						Name: config1.Name,
+						Relations: []*aclpb.Relation{
+							{Name: "other"},
+						},
+					}, nil),
+					nsmanager.EXPECT().LookupRelationReferencesByCount(ctx1, validRequest.Config.Name, []interface{}{"other"}...).Return(map[string]int{}, nil),
+					nsmanager.EXPECT().UpsertConfig(ctx1, validRequest.Config).Return(nil),
+				)
 			},
 		},
 		{
 			name:  "Test-3: Missing config field (InvalidInput)",
-			input: &aclpb.AddConfigRequest{},
+			input: input{request: &aclpb.WriteConfigRequest{}},
 			output: output{
 				err: status.Error(codes.InvalidArgument, "The 'config' field is required and cannot be nil."),
 			},
 		},
 		{
 			name: "Test-4: Missing config.name field (InvalidInput)",
-			input: &aclpb.AddConfigRequest{
-				Config: &aclpb.NamespaceConfig{},
+			input: input{
+				request: &aclpb.WriteConfigRequest{
+					Config: &aclpb.NamespaceConfig{},
+				},
 			},
 			output: output{
 				err: status.Error(codes.InvalidArgument, "The 'config.name' field is required and cannot be empty."),
 			},
 		},
 		{
-			name:  "Test-5: Namespace AlreadyExists error",
-			input: validRequest,
+			name: "Test-5: Removed Relation with References (InvalidArgument)",
+			input: input{
+				ctx:     ctx1,
+				request: validRequest,
+			},
 			output: output{
-				err: status.Error(codes.AlreadyExists, "the provided namespace already exists"),
+				err: status.Error(codes.InvalidArgument, "Relation(s) [relation1] cannot be removed while one or more relation tuples reference them. Please migrate all relation tuples before removing a relation."),
 			},
 			mockController: func(nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().AddConfig(gomock.Any(), validRequest.Config).Return(ErrNamespaceAlreadyExists)
+
+				gomock.InOrder(
+					nsmanager.EXPECT().WrapTransaction(ctx1, gomock.AssignableToTypeOf(wrapTxnFuncType)).DoAndReturn(func(ctx context.Context, fn func(ctx context.Context) error) error {
+						return fn(ctx)
+					}),
+
+					nsmanager.EXPECT().GetConfig(ctx1, validRequest.Config.Name).Return(&aclpb.NamespaceConfig{
+						Name: config1.Name,
+						Relations: []*aclpb.Relation{
+							{Name: "other"},
+						},
+					}, nil),
+					nsmanager.EXPECT().LookupRelationReferencesByCount(ctx1, validRequest.Config.Name, []interface{}{"other"}...).Return(map[string]int{
+						"relation1": 1,
+					}, nil),
+				)
 			},
 		},
 	}
@@ -1254,7 +1341,7 @@ func TestAccessController_AddConfig(t *testing.T) {
 				}
 			}()
 
-			response, err := controller.AddConfig(context.Background(), test.input)
+			response, err := controller.WriteConfig(test.input.ctx, test.input.request)
 
 			if !errors.Is(err, test.output.err) {
 				t.Errorf("Expected error '%v', but got '%v'", test.output.err, err)
@@ -1297,7 +1384,7 @@ func TestAccessController_ReadConfig(t *testing.T) {
 			name:  "Test-1: Database Error",
 			input: validRequest,
 			output: output{
-				err: dbError,
+				err: internalErrorStatus,
 			},
 			mockController: func(nsmanager *MockNamespaceManager) {
 				nsmanager.EXPECT().GetConfig(gomock.Any(), validRequest.Namespace).Return(nil, dbError)
@@ -1368,95 +1455,6 @@ func TestAccessController_ReadConfig(t *testing.T) {
 			}()
 
 			response, err := controller.ReadConfig(context.Background(), test.input)
-
-			if !errors.Is(err, test.output.err) {
-				t.Errorf("Expected error '%v', but got '%v'", test.output.err, err)
-			}
-
-			if !proto.Equal(response, test.output.response) {
-				t.Errorf("Expected response '%v', but got '%v'", test.output.response, response)
-			}
-		})
-	}
-}
-
-func TestAccessController_WriteRelation(t *testing.T) {
-
-	type output struct {
-		response *aclpb.WriteRelationResponse
-		err      error
-	}
-
-	dbError := errors.New("db error")
-
-	validRequest := &aclpb.WriteRelationRequest{
-		Namespace: "namespace1",
-		Relation: &aclpb.Relation{
-			Name: "relation1",
-		},
-	}
-
-	tests := []struct {
-		name  string
-		input *aclpb.WriteRelationRequest
-		output
-		mockController func(nsmanager *MockNamespaceManager)
-	}{
-		{
-			name:  "Test-1: Database Upsert Error",
-			input: validRequest,
-			output: output{
-				err: dbError,
-			},
-			mockController: func(nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().UpsertRelation(gomock.Any(), validRequest.Namespace, validRequest.Relation).Return(dbError)
-			},
-		},
-		{
-			name:  "Test-2: Successful Upsert",
-			input: validRequest,
-			output: output{
-				response: &aclpb.WriteRelationResponse{},
-			},
-			mockController: func(nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().UpsertRelation(gomock.Any(), validRequest.Namespace, validRequest.Relation).Return(nil)
-			},
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
-			mockNamespaceManager := NewMockNamespaceManager(ctrl)
-
-			mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-				changelog := []*NamespaceChangelogEntry{}
-				iter := NewMockChangelogIterator(changelog)
-				return iter, nil
-			})
-
-			if test.mockController != nil {
-				test.mockController(mockNamespaceManager)
-			}
-
-			opts := []AccessControllerOption{
-				WithNamespaceManager(mockNamespaceManager),
-			}
-
-			controller, err := NewAccessController(opts...)
-			if err != nil {
-				t.Fatalf("Failed to initialize the AccessController: %v", err)
-			}
-			defer func() {
-				if err := controller.Close(); err != nil {
-					t.Fatalf("Failed to close the controller: %v", err)
-				}
-			}()
-
-			response, err := controller.WriteRelation(context.Background(), test.input)
 
 			if !errors.Is(err, test.output.err) {
 				t.Errorf("Expected error '%v', but got '%v'", test.output.err, err)

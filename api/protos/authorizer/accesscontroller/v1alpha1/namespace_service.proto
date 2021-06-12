@@ -10,11 +10,16 @@ option go_package = "github.com/authorizer-tech/access-controller/genprotos/auth
 // The service to administer namespace configurations.
 service NamespaceConfigService {
 
-  // Adds a new namespace configuration. If the namespace already exists,
-  // an AlreadyExists status code is returned.
-  rpc AddConfig(AddConfigRequest) returns (AddConfigResponse) {
-      option (google.api.http) = {
-      post: "/authorizer/access-controller/v1alpha1/namespace-configs",
+  // WriteConfig upserts a namespace configuration. If the namespace config already exists,
+  // the existing one is overwritten.
+  //
+  // If the new namespace config removes an existing relation, there must not be any relation
+  // tuples that reference it. Otherwise a FAILED_PRECONDITION status is returned. To migrate
+  // away from a relation, please move all existing relation tuples referencing it over to the
+  // new relation and then delete the old relation once all tuples have been migrated.
+  rpc WriteConfig(WriteConfigRequest) returns (WriteConfigResponse) {
+    option (google.api.http) = {
+      put: "/authorizer/access-controller/v1alpha1/namespace-configs",
       body: "*"
     };
   }
@@ -25,24 +30,16 @@ service NamespaceConfigService {
       get: "/authorizer/access-controller/v1alpha1/namespace-configs"
     };
   }
-
-  // Upserts a relation for the given namespace config.
-  rpc WriteRelation(WriteRelationRequest) returns (WriteRelationResponse) {
-    option (google.api.http) = {
-      post: "/authorizer/access-controller/v1alpha1/namespace-configs/{namespace}",
-      body: "*"
-    };
-  }
 }
 
-// The request for a NamespaceConfigService.AddConfig rpc.
-message AddConfigRequest {
+// The request for a NamespaceConfigService.WriteConfig rpc.
+message WriteConfigRequest {
     NamespaceConfig config = 1;
 }
 
-// The response for a NamespaceConfigService.AddConfig rpc.
-message AddConfigResponse {
-    string snaptoken = 1;
+// The response for a NamespaceConfigService.WriteConfig rpc.
+message WriteConfigResponse {
+
 }
 
 // The request for a NamespaceConfigService.ReadConfig rpc.
@@ -56,17 +53,6 @@ message ReadConfigResponse {
     string namespace = 1;
     NamespaceConfig config = 2;
     string snaptoken = 3;
-}
-
-// The request for a NamespaceConfigService.WriteRelation rpc.
-message WriteRelationRequest {
-    string namespace = 1;
-    Relation relation = 2;
-}
-
-// The response for a NamespaceConfigService.WriteRelation rpc.
-message WriteRelationResponse {
-
 }
 
 message NamespaceConfig {

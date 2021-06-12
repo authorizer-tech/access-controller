@@ -52,14 +52,15 @@
           "NamespaceConfigService"
         ]
       },
-      "post": {
-        "summary": "Adds a new namespace configuration. If the namespace already exists,\nan AlreadyExists status code is returned.",
-        "operationId": "NamespaceConfigService_AddConfig",
+      "put": {
+        "summary": "WriteConfig upserts a namespace configuration. If the namespace config already exists,\nthe existing one is overwritten.",
+        "description": "If the new namespace config removes an existing relation, there must not be any relation\ntuples that reference it. Otherwise a FAILED_PRECONDITION status is returned. To migrate\naway from a relation, please move all existing relation tuples referencing it over to the\nnew relation and then delete the old relation once all tuples have been migrated.",
+        "operationId": "NamespaceConfigService_WriteConfig",
         "responses": {
           "200": {
             "description": "A successful response.",
             "schema": {
-              "$ref": "#/definitions/v1alpha1AddConfigResponse"
+              "$ref": "#/definitions/v1alpha1WriteConfigResponse"
             }
           },
           "default": {
@@ -75,46 +76,7 @@
             "in": "body",
             "required": true,
             "schema": {
-              "$ref": "#/definitions/v1alpha1AddConfigRequest"
-            }
-          }
-        ],
-        "tags": [
-          "NamespaceConfigService"
-        ]
-      }
-    },
-    "/authorizer/access-controller/v1alpha1/namespace-configs/{namespace}": {
-      "post": {
-        "summary": "Upserts a relation for the given namespace config.",
-        "operationId": "NamespaceConfigService_WriteRelation",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/v1alpha1WriteRelationResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/rpcStatus"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "namespace",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/v1alpha1WriteRelationRequest"
+              "$ref": "#/definitions/v1alpha1WriteConfigRequest"
             }
           }
         ],
@@ -182,24 +144,6 @@
           }
         }
       }
-    },
-    "v1alpha1AddConfigRequest": {
-      "type": "object",
-      "properties": {
-        "config": {
-          "$ref": "#/definitions/v1alpha1NamespaceConfig"
-        }
-      },
-      "description": "The request for a NamespaceConfigService.AddConfig rpc."
-    },
-    "v1alpha1AddConfigResponse": {
-      "type": "object",
-      "properties": {
-        "snaptoken": {
-          "type": "string"
-        }
-      },
-      "description": "The response for a NamespaceConfigService.AddConfig rpc."
     },
     "v1alpha1ComputedSubjectset": {
       "type": "object",
@@ -282,21 +226,18 @@
         }
       }
     },
-    "v1alpha1WriteRelationRequest": {
+    "v1alpha1WriteConfigRequest": {
       "type": "object",
       "properties": {
-        "namespace": {
-          "type": "string"
-        },
-        "relation": {
-          "$ref": "#/definitions/v1alpha1Relation"
+        "config": {
+          "$ref": "#/definitions/v1alpha1NamespaceConfig"
         }
       },
-      "description": "The request for a NamespaceConfigService.WriteRelation rpc."
+      "description": "The request for a NamespaceConfigService.WriteConfig rpc."
     },
-    "v1alpha1WriteRelationResponse": {
+    "v1alpha1WriteConfigResponse": {
       "type": "object",
-      "description": "The response for a NamespaceConfigService.WriteRelation rpc."
+      "description": "The response for a NamespaceConfigService.WriteConfig rpc."
     }
   }
 }

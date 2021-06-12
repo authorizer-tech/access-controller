@@ -6,6 +6,7 @@ import (
 
 	"github.com/doug-martin/goqu/v9"
 	_ "github.com/doug-martin/goqu/v9/dialect/postgres" // use postgres dialect driver
+	"github.com/doug-martin/goqu/v9/exp"
 	_ "github.com/lib/pq"
 
 	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
@@ -186,6 +187,32 @@ func (s *SQLStore) TransactRelationTuples(ctx context.Context, tupleInserts []*a
 		if err != nil {
 			return err
 		}
+
+		sqlbuilder = goqu.Dialect("postgres").Insert("namespace-relation-lookup").Cols(
+			"namespace", "relation", "relationtuple",
+		).OnConflict(goqu.DoNothing())
+
+		values := [][]interface{}{
+			goqu.Vals{tuple.Namespace, tuple.Relation, tuple.String()},
+		}
+
+		if subjectSet, ok := tuple.Subject.(*ac.SubjectSet); ok {
+			values = append(values,
+				goqu.Vals{subjectSet.Namespace, subjectSet.Relation, tuple.String()},
+			)
+		}
+
+		sqlbuilder = sqlbuilder.Vals(values...)
+
+		sql, args, err = sqlbuilder.ToSQL()
+		if err != nil {
+			return err
+		}
+
+		_, err = txn.Exec(sql, args...)
+		if err != nil {
+			return err
+		}
 	}
 
 	for _, tuple := range tupleDeletes {
@@ -196,6 +223,36 @@ func (s *SQLStore) TransactRelationTuples(ctx context.Context, tupleInserts []*a
 		})
 
 		sql, args, err := sqlbuilder.ToSQL()
+		if err != nil {
+			return err
+		}
+
+		_, err = txn.Exec(sql, args...)
+		if err != nil {
+			return err
+		}
+
+		expressions := []exp.Expression{
+			goqu.Ex{
+				"namespace":     tuple.Namespace,
+				"relation":      tuple.Relation,
+				"relationtuple": tuple.String(),
+			},
+		}
+
+		if subjectSet, ok := tuple.Subject.(*ac.SubjectSet); ok {
+			expressions = append(expressions,
+				goqu.Ex{
+					"namespace":     subjectSet.Namespace,
+					"relation":      subjectSet.Relation,
+					"relationtuple": tuple.String(),
+				},
+			)
+		}
+
+		sqlbuilder = goqu.Dialect("postgres").Delete("namespace-relation-lookup").Where(expressions...)
+
+		sql, args, err = sqlbuilder.ToSQL()
 		if err != nil {
 			return err
 		}
