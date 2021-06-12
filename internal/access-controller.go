@@ -475,7 +475,8 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 		// request is proxied from another access-controller. If the request
 		// is made externally it won't be present.
 		if a.Hashring.Checksum() != peerChecksum {
-			return false, status.Error(codes.Internal, "Hashring checksums don't match. Retry again soon!")
+			log.Error("Hashring checksums don't match")
+			return false, internalErrorStatus
 		}
 	}
 

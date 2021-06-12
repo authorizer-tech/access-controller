@@ -648,7 +648,7 @@ func TestAccessController_Check(t *testing.T) {
 				},
 			},
 			output: output{
-				err: status.Error(codes.Internal, "Hashring checksums don't match. Retry again soon!"),
+				err: internalErrorStatus,
 			},
 		},
 		{

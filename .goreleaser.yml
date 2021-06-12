@@ -13,20 +13,13 @@ builds:
     goos:
       - linux
       - darwin
-archives:
-  - replacements:
-      darwin: Darwin
-      linux: Linux
-      386: i386
-      amd64: x86_64
 dockers:
   -
     image_templates:
-    - "authorizer-tech/access-controller:{{ .Tag }}"
-    - "authorizer-tech/access-controller:v{{ .Major }}"
-    - "authorizer-tech/access-controller:v{{ .Major }}.{{ .Minor }}"
-    - "authorizer-tech/access-controller:latest"
-    - "gcr.io/jon-whit/authorizer-tech/access-controller"
+    - "gcr.io/authorizer-tech/access-controller:latest"
+    - "gcr.io/authorizer-tech/access-controller:{{ .Tag }}"
+    - "gcr.io/authorizer-tech/access-controller:v{{ .Major }}"
+    - "gcr.io/authorizer-tech/access-controller:v{{ .Major }}.{{ .Minor }}"
     extra_files:
     - testdata
     - db/migrations
