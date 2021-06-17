@@ -6,7 +6,7 @@
       "rewrite": {
         "union": {
           "children": [
-            { "_this": {} }
+            { "this": {} }
           ]
         }
       }
