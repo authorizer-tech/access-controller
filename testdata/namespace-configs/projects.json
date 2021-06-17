@@ -12,9 +12,9 @@
       "rewrite": {
         "union": {
           "children": [
-            { "_this": {} },
+            { "this": {} },
             {
-              "computed_subjectset": {
+              "computedSubjectset": {
                 "relation": "owner"
               }
             }
@@ -27,27 +27,19 @@
       "rewrite": {
         "union": {
           "children": [
-            { "_this": {} },
+            { "this": {} },
             {
-              "rewrite": {
-                "intersection":  {
-                  "children": [
-                    {
-                      "computed_subjectset": {
-                        "relation": "editor"
-                      }
-                    },
-                    {
-                      "tuple_to_subjectset": {
-                        "tupleset": {
-                          "relation": "parent"
-                        },
-                        "computed_subjectset": {
-                          "relation": "viewer"
-                        }
-                      }
-                    }
-                  ]
+              "computedSubjectset": {
+                "relation": "editor"
+              }
+            },
+            {
+              "tupleToSubjectset": {
+                "tupleset": {
+                  "relation": "parent"
+                },
+                "computedSubjectset": {
+                  "relation": "viewer"
                 }
               }
             }
