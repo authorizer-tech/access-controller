@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.1.0] - 2021-06-18
 ### Added
 * Initial `WriteService`, `ReadService`, `CheckService`, and `ExpandService` implementations
 * Namespace config API and continuous namespace config snapshot monitoring
@@ -12,4 +14,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * gRPC or HTTP/JSON (or both) API interfaces
 * Kubernetes Helm chart
 
-[Unreleased]: https://github.com/authorizer-tech/access-controller/tree/master
+[Unreleased]: https://github.com/authorizer-tech/access-controller/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/authorizer-tech/access-controller/releases/tag/v0.1.0
