@@ -1,0 +1,47 @@
+version: "3.9"
+services:
+  access-controller0:
+    image: gcr.io/authorizer-tech/access-controller:latest
+    ports:
+      - "50052:50052"
+      - "8082:8082"
+    command: access-controller -config /etc/config/config.yaml
+    volumes:
+      - "${PWD}/docker:/etc/config"
+    depends_on:
+      - cockroachdb
+
+  access-controller1:
+    image: gcr.io/authorizer-tech/access-controller:latest
+    ports:
+      - "50053:50053"
+      - "8083:8083"
+    command: access-controller -config /etc/config/config.yaml -grpc-port 50053 -http-port 8083 -node-port 7947 -join access-controller0:7946
+    volumes:
+      - "${PWD}/docker:/etc/config"
+    depends_on:
+      - access-controller0
+
+  access-controller2:
+    image: gcr.io/authorizer-tech/access-controller:latest
+    ports:
+      - "50054:50054"
+      - "8084:8084"
+    command: access-controller -config /etc/config/config.yaml -grpc-port 50054 -http-port 8084 -node-port 7948 -join access-controller0:7946,access-controller1:7947
+    volumes:
+      - "${PWD}/docker:/etc/config"
+    depends_on:
+      - access-controller1
+
+  cockroachdb:
+    image: cockroachdb/cockroach:v21.1.1
+    ports:
+      - "26257:26257"
+      - "8080:8080"
+    command: start-single-node --insecure
+    volumes:
+      - "cockroach_data:/cockroach/cockroach-data"
+
+volumes:
+  cockroach_data:
+    driver: local

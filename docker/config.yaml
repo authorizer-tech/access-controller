@@ -1,0 +1,7 @@
+grpcGateway:
+  enabled: true
+
+cockroachdb:
+  host: cockroachdb
+  port: 26257
+  database: postgres

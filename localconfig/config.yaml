@@ -1,0 +1,8 @@
+# a sample access-controller config for local development
+cockroachdb:
+  host: localhost
+  port: 26257
+  database: postgres
+
+grpcGateway:
+  enabled: true

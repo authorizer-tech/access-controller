@@ -50,7 +50,7 @@ type config struct {
 		Enabled bool
 	}
 
-	Postgres struct {
+	CockroachDB struct {
 		Host     string
 		Port     int
 		Database string
@@ -75,12 +75,31 @@ func main() {
 
 	pgUsername := viper.GetString("POSTGRES_USERNAME")
 	pgPassword := viper.GetString("POSTGRES_PASSWORD")
+
+	dbHost := cfg.CockroachDB.Host
+	if dbHost == "" {
+		dbHost = "localhost"
+		log.Warn("The database host was not configured. Defaulting to 'localhost'")
+	}
+
+	dbPort := cfg.CockroachDB.Port
+	if dbPort == 0 {
+		dbPort = 26257
+		log.Warn("The database port was not configured. Defaulting to '26257'")
+	}
+
+	dbName := cfg.CockroachDB.Database
+	if dbName == "" {
+		dbName = "postgres"
+		log.Warn("The database name was not configured. Defaulting to 'postgres'")
+	}
+
 	dsn := fmt.Sprintf("postgresql://%s:%s@%s:%d/%s?sslmode=disable",
 		pgUsername,
 		pgPassword,
-		cfg.Postgres.Host,
-		cfg.Postgres.Port,
-		cfg.Postgres.Database,
+		dbHost,
+		dbPort,
+		dbName,
 	)
 
 	db, err := sql.Open("postgres", dsn)
