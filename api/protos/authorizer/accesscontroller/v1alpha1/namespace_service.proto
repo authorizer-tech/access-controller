@@ -45,14 +45,12 @@ message WriteConfigResponse {
 // The request for a NamespaceConfigService.ReadConfig rpc.
 message ReadConfigRequest {
     string namespace = 1;
-    string snaptoken = 2;
 }
 
 // The response for a NamespaceConfigService.ReadConfig rpc.
 message ReadConfigResponse {
     string namespace = 1;
     NamespaceConfig config = 2;
-    string snaptoken = 3;
 }
 
 message NamespaceConfig {

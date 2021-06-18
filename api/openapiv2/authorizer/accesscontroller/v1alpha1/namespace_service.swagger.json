@@ -40,12 +40,6 @@
             "in": "query",
             "required": false,
             "type": "string"
-          },
-          {
-            "name": "snaptoken",
-            "in": "query",
-            "required": false,
-            "type": "string"
           }
         ],
         "tags": [
@@ -175,9 +169,6 @@
         },
         "config": {
           "$ref": "#/definitions/v1alpha1NamespaceConfig"
-        },
-        "snaptoken": {
-          "type": "string"
         }
       },
       "description": "The response for a NamespaceConfigService.ReadConfig rpc."
