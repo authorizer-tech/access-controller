@@ -269,15 +269,6 @@ func NewAccessController(opts ...AccessControllerOption) (*AccessController, err
 	}
 	ac.Memberlist = list
 
-	meta, err := json.Marshal(NodeMetadata{
-		ServerPort: ac.ServerPort,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	list.LocalNode().Meta = meta
-
 	if ac.Join != "" {
 		joinAddrs := strings.Split(ac.Join, ",")
 
@@ -1022,7 +1013,15 @@ func (a *AccessController) ReadConfig(ctx context.Context, req *aclpb.ReadConfig
 //
 // For more information see https://pkg.go.dev/github.com/hashicorp/memberlist#Delegate
 func (a *AccessController) NodeMeta(limit int) []byte {
-	var meta []byte
+
+	meta, err := json.Marshal(NodeMetadata{
+		ServerPort: a.ServerPort,
+	})
+	if err != nil {
+		log.Errorf("Failed to json.Marshal this node's metadata: %v", err)
+		return nil
+	}
+
 	return meta
 }
 
