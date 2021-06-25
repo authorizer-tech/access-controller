@@ -103,7 +103,11 @@ func TestAccessController_Expand(t *testing.T) {
 		{
 			name: "Test-1: Undefined Namespace",
 			input: &aclpb.ExpandRequest{
-				SubjectSet: &aclpb.SubjectSet{Namespace: "undefined"},
+				SubjectSet: &aclpb.SubjectSet{
+					Namespace: "undefined",
+					Object:    "object1",
+					Relation:  "relation1",
+				},
 			},
 			output: output{
 				err: NamespaceConfigError{
@@ -323,6 +327,45 @@ func TestAccessController_Expand(t *testing.T) {
 						Subject:   &SubjectID{ID: "subject2"},
 					},
 				}, nil)
+			},
+		},
+		{
+			name:  "Test-5: ExpandRequest.SubjectSet undefined",
+			input: &aclpb.ExpandRequest{},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "'subjectSet' is a required field and cannot be nil"),
+			},
+		},
+		{
+			name: "Test-6: ExpandRequest.SubjectSet.Namespace undefined",
+			input: &aclpb.ExpandRequest{
+				SubjectSet: &aclpb.SubjectSet{},
+			},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "'subjectSet.namespace' is a required field and cannot be empty"),
+			},
+		},
+		{
+			name: "Test-7: ExpandRequest.SubjectSet.Object undefined",
+			input: &aclpb.ExpandRequest{
+				SubjectSet: &aclpb.SubjectSet{
+					Namespace: "namespace1",
+				},
+			},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "'subjectSet.object' is a required field and cannot be empty"),
+			},
+		},
+		{
+			name: "Test-8: ExpandRequest.SubjectSet.Relation undefined",
+			input: &aclpb.ExpandRequest{
+				SubjectSet: &aclpb.SubjectSet{
+					Namespace: "namespace1",
+					Object:    "object1",
+				},
+			},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "'subjectSet.relation' is a required field and cannot be empty"),
 			},
 		},
 	}
@@ -657,6 +700,8 @@ func TestAccessController_Check(t *testing.T) {
 				ctx: context.Background(),
 				req: &aclpb.CheckRequest{
 					Namespace: "undefined",
+					Object:    "object1",
+					Relation:  "relation1",
 					Subject:   &aclpb.Subject{Ref: &aclpb.Subject_Id{Id: "subject1"}},
 				},
 			},
@@ -665,6 +710,51 @@ func TestAccessController_Check(t *testing.T) {
 					Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", "undefined"),
 					Type:    NamespaceDoesntExist,
 				}.ToStatus().Err(),
+			},
+		},
+		{
+			name: "Test-10: CheckRequest.Namespace is undefined",
+			input: input{
+				req: &aclpb.CheckRequest{},
+			},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "'namespace' is a required field and cannot be empty"),
+			},
+		},
+		{
+			name: "Test-11: CheckRequest.Object is undefined",
+			input: input{
+				req: &aclpb.CheckRequest{
+					Namespace: groupsConfig.Name,
+				},
+			},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "'object' is a required field and cannot be empty"),
+			},
+		},
+		{
+			name: "Test-12: CheckRequest.Relation is undefined",
+			input: input{
+				req: &aclpb.CheckRequest{
+					Namespace: groupsConfig.Name,
+					Object:    "group1",
+				},
+			},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "'relation' is a required field and cannot be empty"),
+			},
+		},
+		{
+			name: "Test-13: CheckRequest.Subject is undefined",
+			input: input{
+				req: &aclpb.CheckRequest{
+					Namespace: groupsConfig.Name,
+					Object:    "group1",
+					Relation:  "member",
+				},
+			},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "'subject' is a required field and cannot be nil"),
 			},
 		},
 	}
@@ -721,7 +811,7 @@ func TestAccessController_Check(t *testing.T) {
 			response, err := controller.Check(test.input.ctx, test.input.req)
 
 			if !errors.Is(err, test.output.err) {
-				t.Errorf("Expected error '%v', but got '%v'", err, test.output.err)
+				t.Errorf("Expected error '%v', but got '%v'", test.output.err, err)
 			}
 
 			if !proto.Equal(response, test.output.response) {
@@ -839,6 +929,11 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 						Action: aclpb.RelationTupleDelta_ACTION_INSERT,
 						RelationTuple: &aclpb.RelationTuple{
 							Namespace: namespace1Config.Name,
+							Object:    "object1",
+							Relation:  "relation1",
+							Subject: &aclpb.Subject{
+								Ref: &aclpb.Subject_Id{Id: "subject1"},
+							},
 						},
 					},
 				},
@@ -848,13 +943,6 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 					Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace1Config.Name),
 					Type:    NamespaceDoesntExist,
 				}.ToStatus().Err(),
-			},
-			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-					changelog := []*NamespaceChangelogEntry{}
-					iter := NewMockChangelogIterator(changelog)
-					return iter, nil
-				})
 			},
 		},
 		{
@@ -977,6 +1065,80 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 				})
 			},
 		},
+		{
+			name: "Test-6: Empty Namespace Specified",
+			input: &aclpb.WriteRelationTuplesTxnRequest{
+				RelationTupleDeltas: []*aclpb.RelationTupleDelta{
+					{
+						Action:        aclpb.RelationTupleDelta_ACTION_INSERT,
+						RelationTuple: &aclpb.RelationTuple{},
+					},
+				},
+			},
+			output: output{
+				err: status.Errorf(codes.InvalidArgument, "invalid mutation at index '0' - 'namespace' is a required field and cannot be empty"),
+			},
+		},
+		{
+			name: "Test-7: Empty Object Specified",
+			input: &aclpb.WriteRelationTuplesTxnRequest{
+				RelationTupleDeltas: []*aclpb.RelationTupleDelta{
+					{
+						Action: aclpb.RelationTupleDelta_ACTION_INSERT,
+						RelationTuple: &aclpb.RelationTuple{
+							Namespace: "namespace1",
+						},
+					},
+				},
+			},
+			output: output{
+				err: status.Errorf(codes.InvalidArgument, "invalid mutation at index '0' - 'object' is a required field and cannot be empty"),
+			},
+		},
+		{
+			name: "Test-8: Empty Relation Specified",
+			input: &aclpb.WriteRelationTuplesTxnRequest{
+				RelationTupleDeltas: []*aclpb.RelationTupleDelta{
+					{
+						Action: aclpb.RelationTupleDelta_ACTION_INSERT,
+						RelationTuple: &aclpb.RelationTuple{
+							Namespace: "namespace1",
+							Object:    "object1",
+						},
+					},
+				},
+			},
+			output: output{
+				err: status.Errorf(codes.InvalidArgument, "invalid mutation at index '0' - 'relation' is a required field and cannot be empty"),
+			},
+		},
+		{
+			name: "Test-9: Empty Subject Specified",
+			input: &aclpb.WriteRelationTuplesTxnRequest{
+				RelationTupleDeltas: []*aclpb.RelationTupleDelta{
+					{
+						Action: aclpb.RelationTupleDelta_ACTION_INSERT,
+						RelationTuple: &aclpb.RelationTuple{
+							Namespace: "namespace1",
+							Object:    "object1",
+							Relation:  "relation1",
+						},
+					},
+				},
+			},
+			output: output{
+				err: status.Errorf(codes.InvalidArgument, "invalid mutation at index '0' - 'subject' is a required field and cannot be nil"),
+			},
+		},
+		{
+			name: "Test-10: No Mutations Included",
+			input: &aclpb.WriteRelationTuplesTxnRequest{
+				RelationTupleDeltas: []*aclpb.RelationTupleDelta{},
+			},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "one or more mutations must be provided"),
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -990,6 +1152,12 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 
 			if test.mockController != nil {
 				test.mockController(mockStore, mockNamespaceManager)
+			} else {
+				mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
+					changelog := []*NamespaceChangelogEntry{}
+					iter := NewMockChangelogIterator(changelog)
+					return iter, nil
+				})
 			}
 
 			opts := []AccessControllerOption{
@@ -1043,7 +1211,7 @@ func TestAccessController_ListRelationTuples(t *testing.T) {
 		mockController func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager)
 	}{
 		{
-			name: "Undefined Namespace (InvalidArgument)",
+			name: "Test:1  ListRelationTuplesRequest.Query.Namespace undefined",
 			input: &aclpb.ListRelationTuplesRequest{
 				Query: &aclpb.ListRelationTuplesRequest_Query{Namespace: "undefined"},
 			},
@@ -1059,7 +1227,7 @@ func TestAccessController_ListRelationTuples(t *testing.T) {
 			},
 		},
 		{
-			name: "Store Error",
+			name: "Test:2 Store Error",
 			input: &aclpb.ListRelationTuplesRequest{
 				Query: &aclpb.ListRelationTuplesRequest_Query{Namespace: "namespace1"},
 			},
@@ -1084,7 +1252,7 @@ func TestAccessController_ListRelationTuples(t *testing.T) {
 			},
 		},
 		{
-			name: "Successful Response",
+			name: "Test:3 Successful Response",
 			input: &aclpb.ListRelationTuplesRequest{
 				Query: &aclpb.ListRelationTuplesRequest_Query{Namespace: "namespace1"},
 			},
@@ -1137,6 +1305,36 @@ func TestAccessController_ListRelationTuples(t *testing.T) {
 					},
 					nil,
 				)
+			},
+		},
+		{
+			name:  "Test:4 ListRelationTuplesRequest.Query undefined",
+			input: &aclpb.ListRelationTuplesRequest{},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "'query' is a required field and cannot be nil"),
+			},
+			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
+				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
+					changelog := []*NamespaceChangelogEntry{}
+					iter := NewMockChangelogIterator(changelog)
+					return iter, nil
+				})
+			},
+		},
+		{
+			name: "Test:5 ListRelationTuplesRequest.Query.Namespace undefined",
+			input: &aclpb.ListRelationTuplesRequest{
+				Query: &aclpb.ListRelationTuplesRequest_Query{},
+			},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "'query.namespace' is a required field and cannot be empty"),
+			},
+			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
+				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
+					changelog := []*NamespaceChangelogEntry{}
+					iter := NewMockChangelogIterator(changelog)
+					return iter, nil
+				})
 			},
 		},
 	}
@@ -1262,21 +1460,21 @@ func TestAccessController_WriteConfig(t *testing.T) {
 			},
 		},
 		{
-			name:  "Test-3: Missing config field (InvalidInput)",
+			name:  "Test-3: WriteConfigRequest.Config undefined",
 			input: input{request: &aclpb.WriteConfigRequest{}},
 			output: output{
-				err: status.Error(codes.InvalidArgument, "The 'config' field is required and cannot be nil."),
+				err: status.Error(codes.InvalidArgument, "'config' is a required field and cannot be nil"),
 			},
 		},
 		{
-			name: "Test-4: Missing config.name field (InvalidInput)",
+			name: "Test-4: WriteConfigRequest.Config.Name undefined",
 			input: input{
 				request: &aclpb.WriteConfigRequest{
 					Config: &aclpb.NamespaceConfig{},
 				},
 			},
 			output: output{
-				err: status.Error(codes.InvalidArgument, "The 'config.name' field is required and cannot be empty."),
+				err: status.Error(codes.InvalidArgument, "'config.name' is a required field and cannot be empty"),
 			},
 		},
 		{
@@ -1305,6 +1503,128 @@ func TestAccessController_WriteConfig(t *testing.T) {
 						"relation1": 1,
 					}, nil),
 				)
+			},
+		},
+		{
+			name: "Test-6: Unexpected Rewrite Operation",
+			input: input{
+				request: &aclpb.WriteConfigRequest{
+					Config: &aclpb.NamespaceConfig{
+						Name: "namespace1",
+						Relations: []*aclpb.Relation{
+							{
+								Name: "relation1",
+								Rewrite: &aclpb.Rewrite{
+									RewriteOperation: nil,
+								},
+							},
+						},
+					},
+				},
+			},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "unexpected rewrite operation - 'union' or 'intersection' expected"),
+			},
+		},
+		{
+			name: "Test-7: Unexpected Rewrite Set Operation Child Type",
+			input: input{
+				request: &aclpb.WriteConfigRequest{
+					Config: &aclpb.NamespaceConfig{
+						Name: "namespace1",
+						Relations: []*aclpb.Relation{
+							{
+								Name: "relation1",
+								Rewrite: &aclpb.Rewrite{
+									RewriteOperation: &aclpb.Rewrite_Intersection{
+										Intersection: &aclpb.SetOperation{
+											Children: []*aclpb.SetOperation_Child{
+												{ChildType: nil},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "a rewrite set operation child type cannot be nil"),
+			},
+		},
+		{
+			name: "Test-8: Undefined ComputedSubjectSet relation",
+			input: input{
+				request: &aclpb.WriteConfigRequest{
+					Config: &aclpb.NamespaceConfig{
+						Name: "namespace1",
+						Relations: []*aclpb.Relation{
+							{
+								Name: "relation1",
+								Rewrite: &aclpb.Rewrite{
+									RewriteOperation: &aclpb.Rewrite_Intersection{
+										Intersection: &aclpb.SetOperation{
+											Children: []*aclpb.SetOperation_Child{
+												{ChildType: &aclpb.SetOperation_Child_Rewrite{
+													Rewrite: &aclpb.Rewrite{
+														RewriteOperation: &aclpb.Rewrite_Union{
+															Union: &aclpb.SetOperation{
+																Children: []*aclpb.SetOperation_Child{
+																	{ChildType: &aclpb.SetOperation_Child_ComputedSubjectset{
+																		ComputedSubjectset: &aclpb.ComputedSubjectset{
+																			Relation: "relation2",
+																		},
+																	}},
+																},
+															},
+														},
+													},
+												}},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "'relation2' relation is referenced but undefined in the provided namespace config"),
+			},
+		},
+		{
+			name: "Test-9: Undefined ComputedSubjectSet relation",
+			input: input{
+				request: &aclpb.WriteConfigRequest{
+					Config: &aclpb.NamespaceConfig{
+						Name: "namespace1",
+						Relations: []*aclpb.Relation{
+							{
+								Name: "relation1",
+								Rewrite: &aclpb.Rewrite{
+									RewriteOperation: &aclpb.Rewrite_Intersection{
+										Intersection: &aclpb.SetOperation{
+											Children: []*aclpb.SetOperation_Child{
+												{ChildType: &aclpb.SetOperation_Child_TupleToSubjectset{
+													TupleToSubjectset: &aclpb.TupleToSubjectset{
+														Tupleset: &aclpb.TupleToSubjectset_Tupleset{
+															Relation: "relation2",
+														},
+													},
+												}},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			output: output{
+				err: status.Error(codes.InvalidArgument, "'relation2' relation is referenced but undefined in the provided namespace config"),
 			},
 		},
 	}
@@ -1404,10 +1724,10 @@ func TestAccessController_ReadConfig(t *testing.T) {
 			},
 		},
 		{
-			name:  "Test-3: Empty 'namespace' field (InvalidInput)",
+			name:  "Test-3: ReadConfigRequest.Namespace undefined",
 			input: &aclpb.ReadConfigRequest{},
 			output: output{
-				err: status.Error(codes.InvalidArgument, "The 'namespace' field is required and cannot be empty."),
+				err: status.Error(codes.InvalidArgument, "'namespace' is a required field and cannot be empty"),
 			},
 		},
 		{
