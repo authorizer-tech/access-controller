@@ -748,15 +748,30 @@ func (a *AccessController) expand(ctx context.Context, namespace, object, relati
 
 // Check checks if a Subject has a relation to an object within a namespace.
 func (a *AccessController) Check(ctx context.Context, req *aclpb.CheckRequest) (*aclpb.CheckResponse, error) {
-	subject := SubjectFromProto(req.GetSubject())
 
+	namespace := req.GetNamespace()
+	if namespace == "" {
+		return nil, status.Error(codes.InvalidArgument, "'namespace' is a required field and cannot be empty")
+	}
+
+	object := req.GetObject()
+	if object == "" {
+		return nil, status.Error(codes.InvalidArgument, "'object' is a required field and cannot be empty")
+	}
+
+	relation := req.GetRelation()
+	if relation == "" {
+		return nil, status.Error(codes.InvalidArgument, "'relation' is a required field and cannot be empty")
+	}
+
+	subject := SubjectFromProto(req.GetSubject())
 	if subject == nil {
-		return nil, status.Error(codes.InvalidArgument, "'subject' is a required field")
+		return nil, status.Error(codes.InvalidArgument, "'subject' is a required field and cannot be nil")
 	}
 
 	response := aclpb.CheckResponse{}
 
-	permitted, err := a.check(ctx, req.GetNamespace(), req.GetObject(), req.GetRelation(), subject.String())
+	permitted, err := a.check(ctx, namespace, object, relation, subject.String())
 	if err != nil {
 		return nil, err
 	}
@@ -772,13 +787,29 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 	inserts := []*InternalRelationTuple{}
 	deletes := []*InternalRelationTuple{}
 
-	for _, delta := range req.GetRelationTupleDeltas() {
+	for i, delta := range req.GetRelationTupleDeltas() {
 		action := delta.GetAction()
 		rt := delta.GetRelationTuple()
 
 		namespace := rt.GetNamespace()
+		if namespace == "" {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid mutation at index '%d' - 'namespace' is a required field and cannot be empty", i)
+		}
+
+		object := rt.GetObject()
+		if object == "" {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid mutation at index '%d' - 'object' is a required field and cannot be empty", i)
+		}
+
 		relation := rt.GetRelation()
+		if relation == "" {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid mutation at index '%d' - 'relation' is a required field and cannot be empty", i)
+		}
+
 		subject := SubjectFromProto(rt.GetSubject())
+		if subject == nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid mutation at index '%d' - 'subject' is a required field and cannot be nil", i)
+		}
 
 		configSnapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
 		if err != nil {
@@ -790,7 +821,7 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 
 		irt := InternalRelationTuple{
 			Namespace: namespace,
-			Object:    rt.GetObject(),
+			Object:    object,
 			Relation:  relation,
 			Subject:   subject,
 		}
@@ -838,6 +869,10 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 		}
 	}
 
+	if len(inserts) <= 0 && len(deletes) <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "one or more mutations must be provided")
+	}
+
 	if err := a.RelationTupleStore.TransactRelationTuples(ctx, inserts, deletes); err != nil {
 		log.Errorf("TransactRelationTuples failed with error: %v", err)
 
@@ -852,7 +887,16 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 // returned.
 func (a *AccessController) ListRelationTuples(ctx context.Context, req *aclpb.ListRelationTuplesRequest) (*aclpb.ListRelationTuplesResponse, error) {
 
+	query := req.GetQuery()
+	if query == nil {
+		return nil, status.Error(codes.InvalidArgument, "'query' is a required field and cannot be nil")
+	}
+
 	namespace := req.GetQuery().GetNamespace()
+	if namespace == "" {
+		return nil, status.Error(codes.InvalidArgument, "'query.namespace' is a required field and cannot be empty")
+	}
+
 	_, err := a.chooseNamespaceConfigSnapshot(namespace)
 	if err != nil {
 		return nil, NamespaceConfigError{
@@ -885,9 +929,24 @@ func (a *AccessController) ListRelationTuples(ctx context.Context, req *aclpb.Li
 func (a *AccessController) Expand(ctx context.Context, req *aclpb.ExpandRequest) (*aclpb.ExpandResponse, error) {
 
 	subject := req.GetSubjectSet()
+	if subject == nil {
+		return nil, status.Error(codes.InvalidArgument, "'subjectSet' is a required field and cannot be nil")
+	}
+
 	namespace := subject.GetNamespace()
+	if namespace == "" {
+		return nil, status.Error(codes.InvalidArgument, "'subjectSet.namespace' is a required field and cannot be empty")
+	}
+
 	object := subject.GetObject()
+	if object == "" {
+		return nil, status.Error(codes.InvalidArgument, "'subjectSet.object' is a required field and cannot be empty")
+	}
+
 	relation := subject.GetRelation()
+	if relation == "" {
+		return nil, status.Error(codes.InvalidArgument, "'subjectSet.relation' is a required field and cannot be empty")
+	}
 
 	tree, err := a.expand(ctx, namespace, object, relation, 12)
 	if err != nil {
@@ -912,12 +971,12 @@ func (a *AccessController) WriteConfig(ctx context.Context, req *aclpb.WriteConf
 
 	config := req.GetConfig()
 	if config == nil {
-		return nil, status.Error(codes.InvalidArgument, "The 'config' field is required and cannot be nil.")
+		return nil, status.Error(codes.InvalidArgument, "'config' is a required field and cannot be nil")
 	}
 
 	namespace := config.GetName()
 	if namespace == "" {
-		return nil, status.Error(codes.InvalidArgument, "The 'config.name' field is required and cannot be empty.")
+		return nil, status.Error(codes.InvalidArgument, "'config.name' is a required field and cannot be empty")
 	}
 
 	relations := config.GetRelations()
@@ -997,7 +1056,7 @@ func (a *AccessController) ReadConfig(ctx context.Context, req *aclpb.ReadConfig
 
 	namespace := req.GetNamespace()
 	if namespace == "" {
-		return nil, status.Error(codes.InvalidArgument, "The 'namespace' field is required and cannot be empty.")
+		return nil, status.Error(codes.InvalidArgument, "'namespace' is a required field and cannot be empty")
 	}
 
 	config, err := a.NamespaceManager.GetConfig(ctx, namespace)
@@ -1235,7 +1294,7 @@ func validateRewriteRelations(definedRelations map[string]struct{}, rewrite *acl
 	case *aclpb.Rewrite_Union:
 		children = o.Union.GetChildren()
 	default:
-		panic("Unexpected rewrite operation encountered")
+		return fmt.Errorf("unexpected rewrite operation - 'union' or 'intersection' expected")
 	}
 
 	for _, child := range children {
@@ -1260,7 +1319,7 @@ func validateRewriteRelations(definedRelations map[string]struct{}, rewrite *acl
 					return fmt.Errorf("'%s' relation is referenced but undefined in the provided namespace config", relation)
 				}
 			default:
-				panic("Unexpected rewrite set operation type")
+				return fmt.Errorf("unexpected rewrite operation child - 'this', 'computedSubjectset', 'tupleToSubjectset', or 'rewrite' expected")
 			}
 		}
 	}

@@ -218,7 +218,7 @@ func SubjectFromProto(sub *pb.Subject) Subject {
 			Relation:  s.Set.Relation,
 		}
 	default:
-		return nil // impossible to hit this unless we export another unexpected type from the protos
+		return nil
 	}
 }
 
