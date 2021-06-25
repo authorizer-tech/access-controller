@@ -1318,10 +1318,8 @@ func validateRewriteRelations(definedRelations map[string]struct{}, rewrite *acl
 				if _, ok := definedRelations[relation]; !ok {
 					return fmt.Errorf("'%s' relation is referenced but undefined in the provided namespace config", relation)
 				}
-			case nil:
-				return fmt.Errorf("a rewrite set operation child type cannot be nil")
 			default:
-				return fmt.Errorf("unexpected rewrite set operation child type encountered")
+				return fmt.Errorf("unexpected rewrite operation child - 'this', 'computedSubjectset', 'tupleToSubjectset', or 'rewrite' expected")
 			}
 		}
 	}

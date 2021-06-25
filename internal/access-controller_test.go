@@ -1550,7 +1550,7 @@ func TestAccessController_WriteConfig(t *testing.T) {
 				},
 			},
 			output: output{
-				err: status.Error(codes.InvalidArgument, "a rewrite set operation child type cannot be nil"),
+				err: status.Error(codes.InvalidArgument, "unexpected rewrite operation child - 'this', 'computedSubjectset', 'tupleToSubjectset', or 'rewrite' expected"),
 			},
 		},
 		{
