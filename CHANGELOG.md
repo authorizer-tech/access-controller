@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2021-06-25
+### Added
+* RPC input request validation
+
 ## [0.1.0] - 2021-06-18
 ### Added
 * Initial `WriteService`, `ReadService`, `CheckService`, and `ExpandService` implementations
@@ -14,5 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * gRPC or HTTP/JSON (or both) API interfaces
 * Kubernetes Helm chart
 
-[Unreleased]: https://github.com/authorizer-tech/access-controller/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/authorizer-tech/access-controller/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/authorizer-tech/access-controller/releases/tag/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/authorizer-tech/access-controller/releases/tag/v0.1.0
