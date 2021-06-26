@@ -2088,6 +2088,28 @@ func TestAccessController_GetBroadcasts(t *testing.T) {
 	}
 }
 
+func TestAccessController_NodeMeta(t *testing.T) {
+
+	controller := AccessController{
+		NodeConfigs: NodeConfigs{
+			ServerPort: 50052,
+		},
+	}
+
+	expected, err := json.Marshal(NodeMetadata{
+		ServerPort: 50052,
+	})
+	if err != nil {
+		t.Fatalf("Failed to json.Marshal the expected NodeMetadata: %v", err)
+	}
+
+	meta := controller.NodeMeta(0)
+
+	if !reflect.DeepEqual(meta, expected) {
+		t.Errorf("Expected metadata '%s', but got '%s'", expected, meta)
+	}
+}
+
 func TestAccessController_watchNamespaceConfigs(t *testing.T) {
 
 	timestamp := time.Now()
