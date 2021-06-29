@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/cockroachdb"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -27,6 +28,7 @@ import (
 	"github.com/authorizer-tech/access-controller/internal/namespace-manager/postgres"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
 
@@ -106,7 +108,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to establish a connection to the database: %v", err)
 	}
-	if err := db.Ping(); err != nil {
+
+	backoffPolicy := backoff.NewExponentialBackOff()
+	backoffPolicy.MaxElapsedTime = 15 * time.Second
+
+	err = backoff.Retry(func() error {
+		if err := db.Ping(); err != nil {
+			log.Error("Failed to Ping the database. Retrying again soon...")
+			return err
+		}
+
+		return nil
+	}, backoffPolicy)
+	if err != nil {
 		log.Fatalf("Failed to connect to the database: %v", err)
 	}
 
@@ -159,6 +173,8 @@ func main() {
 		log.Fatalf("Failed to initialize the access-controller: %v", err)
 	}
 
+	healthChecker := ac.NewHealthChecker(controller.HealthCheck)
+
 	addr := fmt.Sprintf(":%d", *grpcPort)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -172,6 +188,7 @@ func main() {
 	aclpb.RegisterReadServiceServer(server, controller)
 	aclpb.RegisterExpandServiceServer(server, controller)
 	aclpb.RegisterNamespaceConfigServiceServer(server, controller)
+	grpc_health_v1.RegisterHealthServer(server, healthChecker)
 
 	go func() {
 		reflection.Register(server)
