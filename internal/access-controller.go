@@ -17,6 +17,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
@@ -1064,6 +1065,14 @@ func (a *AccessController) ReadConfig(ctx context.Context, req *aclpb.ReadConfig
 	}
 
 	return resp, nil
+}
+
+// HealthCheck returns a grpc.health.v1.HealthCheckResponse to indicate the healthiness of the access-controller.
+func (a *AccessController) HealthCheck(ctx context.Context, req *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
+
+	return &grpc_health_v1.HealthCheckResponse{
+		Status: grpc_health_v1.HealthCheckResponse_SERVING,
+	}, nil
 }
 
 // NodeMeta is used to retrieve meta-data about the current node

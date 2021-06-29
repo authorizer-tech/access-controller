@@ -13,6 +13,7 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/hashicorp/memberlist"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -1784,6 +1785,22 @@ func TestAccessController_ReadConfig(t *testing.T) {
 				t.Errorf("Expected response '%v', but got '%v'", test.output.response, response)
 			}
 		})
+	}
+}
+
+func TestAccessController_HealthCheck(t *testing.T) {
+	controller := AccessController{}
+
+	resp, err := controller.HealthCheck(context.Background(), &grpc_health_v1.HealthCheckRequest{})
+	if err != nil {
+		t.Fatal("Expected nil error but got non-nil")
+	}
+
+	expected := &grpc_health_v1.HealthCheckResponse{
+		Status: grpc_health_v1.HealthCheckResponse_SERVING,
+	}
+	if !proto.Equal(resp, expected) {
+		t.Errorf("Expected response '%v', but got '%v'", expected, resp)
 	}
 }
 
