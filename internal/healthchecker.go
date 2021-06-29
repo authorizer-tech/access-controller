@@ -32,9 +32,9 @@ func (s *HealthChecker) Check(ctx context.Context, req *grpc_health_v1.HealthChe
 	return s.healthCheckHandler(ctx, req)
 }
 
-// Watch is left as an unimplemented. Please use the HealthChecker.Check RPC
-// instead. If this RPC is needed in the future, an implementation will be
-// provided at that time.
+// Watch is left unimplemented. Please use the HealthChecker.Check RPC instead.
+// If this RPC is needed in the future, an implementation will be provided at
+// that time.
 func (s *HealthChecker) Watch(req *grpc_health_v1.HealthCheckRequest, srv grpc_health_v1.Health_WatchServer) error {
 	return status.Error(codes.Unimplemented, "unimplemented")
 }
