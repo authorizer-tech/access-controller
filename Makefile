@@ -28,16 +28,16 @@ MOCK_RELATION_STORE = $(PWD)/internal/mock_relationstore_test.go
 MOCKS=$(MOCK_CLIENT_ROUTER) $(MOCK_HASHRING) $(MOCK_NAMESPACE_MANAGER) $(MOCK_RELATION_STORE)
 
 $(MOCK_CLIENT_ROUTER): $(MOCKGEN_BINARY) $(PWD)/internal/client-router.go
-	go generate $(PWD)/internal/client-router.go
+	@go generate $(PWD)/internal/client-router.go
 
 $(MOCK_HASHRING): $(MOCKGEN_BINARY) $(PWD)/internal/hashring.go
-	go generate $(PWD)/internal/hashring.go
+	@go generate $(PWD)/internal/hashring.go
 
 $(MOCK_NAMESPACE_MANAGER): $(MOCK_BINARY) $(PWD)/internal/namespace.go
-	go generate $(PWD)/internal/namespace.go
+	@go generate $(PWD)/internal/namespace.go
 
 $(MOCK_RELATION_STORE): $(MOCK_BINARY) $(PWD)/internal/relation-store.go
-	go generate $(PWD)/internal/relation-store.go
+	@go generate $(PWD)/internal/relation-store.go
 
 .PHONY: download
 download:
