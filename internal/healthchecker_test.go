@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"github.com/pkg/errors"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -101,5 +103,17 @@ func TestHealthChecker_Check(t *testing.T) {
 				t.Errorf("Expected response '%v', but got '%v'", test.output.response, response)
 			}
 		})
+	}
+}
+
+func TestHealthCheck_Watch(t *testing.T) {
+
+	checker := NewHealthChecker(nil)
+
+	expected := status.Error(codes.Unimplemented, "unimplemented")
+
+	err := checker.Watch(nil, nil)
+	if !errors.Is(err, expected) {
+		t.Errorf("Expected error '%v', but got '%v'", expected, err)
 	}
 }

@@ -3,7 +3,9 @@ package accesscontroller
 import (
 	"context"
 
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 )
 
 type healthCheckHandler func(ctx context.Context, req *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error)
@@ -30,16 +32,9 @@ func (s *HealthChecker) Check(ctx context.Context, req *grpc_health_v1.HealthChe
 	return s.healthCheckHandler(ctx, req)
 }
 
-// Watch streams back to the client a single health check status.
-//
-// Future implementations of this RPC could implement the health check with a
-// continuous stream instead of a single status snapshot.
+// Watch is left as an unimplemented. Please use the HealthChecker.Check RPC
+// instead. If this RPC is needed in the future, an implementation will be
+// provided at that time.
 func (s *HealthChecker) Watch(req *grpc_health_v1.HealthCheckRequest, srv grpc_health_v1.Health_WatchServer) error {
-
-	resp, err := s.healthCheckHandler(context.Background(), req)
-	if err != nil {
-		return err
-	}
-
-	return srv.Send(resp)
+	return status.Error(codes.Unimplemented, "unimplemented")
 }
