@@ -17,7 +17,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 var dirsConfig = &aclpb.NamespaceConfig{
@@ -155,7 +154,7 @@ func TestAccessController_Expand(t *testing.T) {
 					Namespace: "files",
 					Object:    "file1",
 					Relations: []string{"owner"},
-				}, &fieldmaskpb.FieldMask{}).Return([]InternalRelationTuple{
+				}).Return([]InternalRelationTuple{
 					{
 						Namespace: "files",
 						Object:    "file1",
@@ -218,7 +217,7 @@ func TestAccessController_Expand(t *testing.T) {
 					Namespace: "files",
 					Object:    "file1",
 					Relations: []string{"parent"},
-				}, &fieldmaskpb.FieldMask{}).Return([]InternalRelationTuple{
+				}).Return([]InternalRelationTuple{
 					{
 						Namespace: "files",
 						Object:    "file1",
@@ -235,7 +234,7 @@ func TestAccessController_Expand(t *testing.T) {
 					Namespace: "dirs",
 					Object:    "dir1",
 					Relations: []string{"viewer"},
-				}, &fieldmaskpb.FieldMask{}).Return([]InternalRelationTuple{
+				}).Return([]InternalRelationTuple{
 					{
 						Namespace: "dirs",
 						Object:    "dir1",
@@ -307,7 +306,7 @@ func TestAccessController_Expand(t *testing.T) {
 					Namespace: "files",
 					Object:    "file1",
 					Relations: []string{"editor"},
-				}, &fieldmaskpb.FieldMask{}).Return([]InternalRelationTuple{
+				}).Return([]InternalRelationTuple{
 					{
 						Namespace: "files",
 						Object:    "file1",
@@ -320,7 +319,7 @@ func TestAccessController_Expand(t *testing.T) {
 					Namespace: "files",
 					Object:    "file1",
 					Relations: []string{"owner"},
-				}, &fieldmaskpb.FieldMask{}).Return([]InternalRelationTuple{
+				}).Return([]InternalRelationTuple{
 					{
 						Namespace: "files",
 						Object:    "file1",
@@ -1249,7 +1248,7 @@ func TestAccessController_ListRelationTuples(t *testing.T) {
 					return iter, nil
 				})
 
-				store.EXPECT().ListRelationTuples(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, dbError)
+				store.EXPECT().ListRelationTuples(gomock.Any(), gomock.Any()).Return(nil, dbError)
 			},
 		},
 		{
@@ -1289,7 +1288,7 @@ func TestAccessController_ListRelationTuples(t *testing.T) {
 					return iter, nil
 				})
 
-				store.EXPECT().ListRelationTuples(gomock.Any(), gomock.Any(), gomock.Any()).Return(
+				store.EXPECT().ListRelationTuples(gomock.Any(), gomock.Any()).Return(
 					[]InternalRelationTuple{
 						{
 							Namespace: "namespace1",

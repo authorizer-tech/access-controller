@@ -9,40 +9,51 @@ option go_package = "github.com/authorizer-tech/access-controller/genprotos/auth
 // The service to serve Expand RPC requests.
 service ExpandService {
 
-  // Expand will expand all the subjects given in the subject set.
-  // Expand follows direct and indirect subject sets in a depth-first
-  // fashion.
+  // Expands all the relation tuples for all of the subjects given
+  // in the SubjectSet.
+  //
+  // Expand follows direct and indirect SubjectSets in a depth-first fashion.
   rpc Expand(ExpandRequest) returns (ExpandResponse);
 }
 
 // The request for an ExpandService.Expand rpc.
 message ExpandRequest {
 
+  // The SubjectSet to expand.
   SubjectSet subject_set = 1;
+
+  // Optional. The snapshot token that encodes the evaluation timestamp that this request will be evaluated no earlier than.
+  //
+  // If no snapshot token is provided the expand request is evaluated against the most recently replicated version of the relation
+  // tuple storage. Leaving an empty snapshot token will reflect the latest changes, but it may incur a read penalty because the
+  // reads have to be directed toward the leaseholder of the replica that serves the data.
+  string snaptoken = 2;
 }
 
 // The response for an ExpandService.Expand rpc.
 message ExpandResponse {
 
-  // The tree the requested subject set expands to.
-  // The requested subject set is the subject of the root.
+  // The tree the requested SubjectSet expands to. The requested
+  // SubjectSet is the subject of the root.
   //
   // This field can be nil in some circumstances.
   SubjectTree tree = 1;
 }
 
+// An enumeration defining types of nodes within a SubjectTree.
 enum NodeType {
 
   NODE_TYPE_UNSPECIFIED = 0;
 
-  // This node expands to a union of all children.
+  // A node type which expands to a union of all children.
   NODE_TYPE_UNION = 1;
 
-  // This node expands to an intersection of the children.
+  // A node type which expands to an intersection of the children.
   NODE_TYPE_INTERSECTION = 3;
 
-  // This node is a leaf and contains no children.
-  // Its subject is a `SubjectID` unless `max_depth` was reached.
+  // A node type which is a leaf and contains no children.
+  //
+  // Its Subject is a subject id string unless the maximum call depth was reached.
   NODE_TYPE_LEAF = 4;
 }
 

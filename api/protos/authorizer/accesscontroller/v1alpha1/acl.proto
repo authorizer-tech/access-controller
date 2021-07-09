@@ -4,52 +4,52 @@ package authorizer.accesscontroller.v1alpha1;
 
 option go_package = "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1;acl";
 
-// RelationTuple relates an Object with a Subject.
+// RelationTuple relates an object with a subject.
 //
-// While a tuple reflects a relationship between Object
-// and Subject, they do not completely define the effective ACLs.
+// While a tuple reflects a relationship between object
+// and subject, they do not completely define the effective ACLs.
 message RelationTuple {
+
   // The namespace this relation tuple lives in.
   string namespace = 1;
 
-  // The object related by this tuple.
+  // The object identifier related by this tuple.
+  //
   // Objects live within the namespace of the tuple.
   string object = 2;
 
-  // The relation between an Object and a Subject.
+  // The relation between the Object and the Subject.
   string relation = 3;
 
   // The subject related by this tuple.
-  // A Subject either represents a concrete subject id or
-  // a SubjectSet that expands to more Subjects.
   Subject subject = 4;
 }
 
-// Subject is either a concrete subject id or
-// a subject set expanding to more Subjects.
+// Subject is either a concrete subject id string or
+// a SubjectSet expanding to more Subjects.
 message Subject {
+
   // The reference of this abstract subject.
   oneof ref {
-    // A concrete id of the subject.
+
+    // A concrete subject id string for the subject.
     string id = 1;
 
-    // A subject set that expands to more Subjects
-    // (used for inheritance).
+    // A SubjectSet that expands to more Subjects.
     SubjectSet set = 2;
   }
 }
 
-// SubjectSet refers to all subjects which have
-// the same `relation` to an `object`.
-// It is also used for inheritance.
+// A SubjectSet refers to all subjects which have the same
+// relation to an object.
 message SubjectSet {
-  // The namespace of the object and relation
-  // referenced in this subject set.
+
+  // The namespace of the object and relation referenced in this SubjectSet.
   string namespace = 1;
 
   // The object selected by the subjects.
   string object = 2;
 
-  // The relation to the object by the subjects.
+  // The relation between the object and the subject(s).
   string relation = 3;
 }

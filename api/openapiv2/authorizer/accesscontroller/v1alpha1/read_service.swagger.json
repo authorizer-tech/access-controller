@@ -18,7 +18,8 @@
   "paths": {
     "/authorizer/access-controller/v1alpha1/tuples": {
       "get": {
-        "summary": "Lists ACL relation tuples.",
+        "summary": "Lists relation tuples.",
+        "description": "**NOTE**: This does not follow direct or indirect references through rewrites. If youq\nneed to follow indirect references through rewrites, please use the Expand API.",
         "operationId": "ReadService_ListRelationTuples",
         "responses": {
           "200": {
@@ -62,14 +63,14 @@
           },
           {
             "name": "query.subject.id",
-            "description": "A concrete id of the subject.",
+            "description": "A concrete subject id string for the subject.",
             "in": "query",
             "required": false,
             "type": "string"
           },
           {
             "name": "query.subject.set.namespace",
-            "description": "The namespace of the object and relation\nreferenced in this subject set.",
+            "description": "The namespace of the object and relation referenced in this SubjectSet.",
             "in": "query",
             "required": false,
             "type": "string"
@@ -83,21 +84,14 @@
           },
           {
             "name": "query.subject.set.relation",
-            "description": "The relation to the object by the subjects.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "expandMask",
-            "description": "Optional. The list of fields to expand in the RelationTuple\nlist returned in `ListRelationTuplesResponse`. Leaving this\nfield unspecified means all fields are expanded.\n\nAvailable fields:\n`object`, `relation`, `subject`,\n`namespace`, `subject.id`, `subject.namespace`,\n`subject.object`, `subject.relation`",
+            "description": "The relation between the object and the subject(s).",
             "in": "query",
             "required": false,
             "type": "string"
           },
           {
             "name": "snaptoken",
-            "description": "Optional. The snapshot token for this read.",
+            "description": "Optional. The snapshot token that encodes the evaluation timestamp that this request will be evaluated no earlier than.",
             "in": "query",
             "required": false,
             "type": "string"
@@ -209,39 +203,39 @@
         },
         "object": {
           "type": "string",
-          "description": "The object related by this tuple.\nObjects live within the namespace of the tuple."
+          "description": "The object identifier related by this tuple.\n\nObjects live within the namespace of the tuple."
         },
         "relation": {
           "type": "string",
-          "description": "The relation between an Object and a Subject."
+          "description": "The relation between the Object and the Subject."
         },
         "subject": {
           "$ref": "#/definitions/v1alpha1Subject",
-          "description": "The subject related by this tuple.\nA Subject either represents a concrete subject id or\na SubjectSet that expands to more Subjects."
+          "description": "The subject related by this tuple."
         }
       },
-      "description": "RelationTuple relates an Object with a Subject.\n\nWhile a tuple reflects a relationship between Object\nand Subject, they do not completely define the effective ACLs."
+      "description": "RelationTuple relates an object with a subject.\n\nWhile a tuple reflects a relationship between object\nand subject, they do not completely define the effective ACLs."
     },
     "v1alpha1Subject": {
       "type": "object",
       "properties": {
         "id": {
           "type": "string",
-          "description": "A concrete id of the subject."
+          "description": "A concrete subject id string for the subject."
         },
         "set": {
           "$ref": "#/definitions/v1alpha1SubjectSet",
-          "description": "A subject set that expands to more Subjects\n(used for inheritance)."
+          "description": "A SubjectSet that expands to more Subjects."
         }
       },
-      "description": "Subject is either a concrete subject id or\na subject set expanding to more Subjects."
+      "description": "Subject is either a concrete subject id string or\na SubjectSet expanding to more Subjects."
     },
     "v1alpha1SubjectSet": {
       "type": "object",
       "properties": {
         "namespace": {
           "type": "string",
-          "description": "The namespace of the object and relation\nreferenced in this subject set."
+          "description": "The namespace of the object and relation referenced in this SubjectSet."
         },
         "object": {
           "type": "string",
@@ -249,10 +243,10 @@
         },
         "relation": {
           "type": "string",
-          "description": "The relation to the object by the subjects."
+          "description": "The relation between the object and the subject(s)."
         }
       },
-      "description": "SubjectSet refers to all subjects which have\nthe same `relation` to an `object`.\nIt is also used for inheritance."
+      "description": "A SubjectSet refers to all subjects which have the same\nrelation to an object."
     }
   }
 }

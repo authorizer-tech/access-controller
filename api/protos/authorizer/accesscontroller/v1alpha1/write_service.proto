@@ -7,10 +7,10 @@ import "google/api/annotations.proto";
 
 option go_package = "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1;acl";
 
-// The write service to create and delete Access Control Lists.
+// A service that defines APIs to manage relation tuple ACLs.
 service WriteService {
 
-  // Writes one or more relation tuples in a single transaction.
+  // Mutates one or more relation tuples within a single transaction.
   rpc WriteRelationTuplesTxn(WriteRelationTuplesTxnRequest) returns (WriteRelationTuplesTxnResponse) {
     option (google.api.http) = {
       post: "/authorizer/access-controller/v1alpha1/write",
@@ -24,28 +24,28 @@ message WriteRelationTuplesTxnRequest {
 
   // The write delta for the relation tuples operated in one single transaction.
   // Either all actions commit or no changes take effect on error.
-  //
-  // The tuple's etag is used for a consistent read-modify-write request flow.
-  // If the etag is not present, the tuple is not validated against the state
-  // of the serverside tuple.
   repeated RelationTupleDelta relation_tuple_deltas = 1;
 }
 
 // Write-delta for a WriteRelationTuplesTxnRequest.
 message RelationTupleDelta {
 
+  // An enumeration defining the actions or mutations that can be done on a RelationTuple.
   enum Action {
-    // Unspecified.
-    // The `WriteRelationTuplesTxn` rpc ignores this
-    // RelationTupleDelta if an action was unspecified.
+    // An unspecified action.
+    //
+    // The `WriteRelationTuplesTxn` rpc ignores RelationTupleDeltas with
+    // an unspecified action.
     ACTION_UNSPECIFIED = 0;
 
-    // Insertion of a new RelationTuple.
-    // It is ignored if already existing.
+    // Upserts a new RelationTuple.
+    //
+    // If the RelationTuple already exists no modification is done.
     ACTION_INSERT = 1;
 
-    // Deletion of the RelationTuple.
-    // It is ignored if it does not exist.
+    // Deletes the RelationTuple.
+    //
+    // If the RelationTuple does not exist it's a no-op.
     ACTION_DELETE = 4;
   }
 

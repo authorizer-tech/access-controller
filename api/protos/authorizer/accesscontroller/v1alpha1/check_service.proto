@@ -7,11 +7,12 @@ import "google/api/annotations.proto";
 
 option go_package = "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1;acl";
 
-// The service that performs authorization checks
-// based on the stored Access Control Lists.
+// The service that performs access-control checks
+// based on stored Access Control Lists.
 service CheckService {
 
-  // Check performs an authorization check.
+  // Check performs an access-control check by looking up if a specific subject
+  // is related to an object.
   rpc Check(CheckRequest) returns (CheckResponse) {
     option (google.api.http) = {
       get: "/authorizer/access-controller/v1alpha1/check"
@@ -20,33 +21,39 @@ service CheckService {
 }
 
 // The request for a CheckService.Check rpc.
-// Checks whether a specific subject is related to an object.
 message CheckRequest {
 
-  // The namespace to evaluate the check.
-  //
-  // Note: If you use the Expand API and the check
-  // evaluates a RelationTuple specifying a SubjectSet as
-  // subject or due to a rewrite rule in a namespace config
-  // this check request may involve other namespaces automatically.
-  string namespace = 5;
+  // The namespace to evaluate the check within.
+  string namespace = 1;
 
-  // The related object in this check.
+  // The object to check.
   string object = 2;
 
-  // The relation between the Object and the Subject.
+  // The relation between the object and the subject.
   string relation = 3;
 
-  // The related subject to check against.
+  // The subject to check.
   Subject subject = 4;
+
+  // Optional. The snapshot token that encodes the evaluation timestamp that this request will be evaluated no earlier than.
+  //
+  // If no snapshot token is provided the check request is evaluated against the most recently replicated version of the relation
+  // tuple storage. Leaving an empty snapshot token will reflect the latest changes, but it may incur a read penalty because the
+  // reads have to be directed toward the leaseholder of the replica that serves the data.
+  //
+  // We call requests without a snapshot token a content-change check, because such requests require a round-trip read but return
+  // the most recent writes and are thus good candidates for checking real-time content changes before an object is persisted.
+  string snaptoken = 5;
 }
 
 // The response for a CheckService.Check rpc.
 message CheckResponse {
 
-  // Whether the specified subject is
-  // related to the requested object.
+  // A boolean indicating if the specified subject is related to the requested object.
   //
   // It is false by default if no ACL matches.
   bool allowed = 1;
+
+  // A snapshot token encoding the snapshot evaluation timestamp that the request was evaluated at.
+  string snaptoken = 2;
 }

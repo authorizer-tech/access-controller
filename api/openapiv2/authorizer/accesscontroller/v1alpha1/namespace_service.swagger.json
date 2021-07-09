@@ -37,6 +37,7 @@
         "parameters": [
           {
             "name": "namespace",
+            "description": "The namespace whose config should be read.",
             "in": "query",
             "required": false,
             "type": "string"
@@ -47,8 +48,8 @@
         ]
       },
       "put": {
-        "summary": "WriteConfig upserts a namespace configuration. If the namespace config already exists,\nthe existing one is overwritten.",
-        "description": "If the new namespace config removes an existing relation, there must not be any relation\ntuples that reference it. Otherwise a FAILED_PRECONDITION status is returned. To migrate\naway from a relation, please move all existing relation tuples referencing it over to the\nnew relation and then delete the old relation once all tuples have been migrated.",
+        "summary": "WriteConfig upserts a namespace configuration.",
+        "description": "If the namespace config already exists, the existing one is overwritten. If the new\nnamespace config removes an existing relation, there must not be any relation tuples\nthat reference it. Otherwise a FAILED_PRECONDITION status is returned.\n\nTo migrate away from a relation, please move all existing relation tuples referencing\nit over to the new relation and then delete the old relation once all tuples have been\nmigrated.",
         "operationId": "NamespaceConfigService_WriteConfig",
         "responses": {
           "200": {
@@ -82,7 +83,8 @@
   },
   "definitions": {
     "ChildThis": {
-      "type": "object"
+      "type": "object",
+      "description": "This references the defined relation directly."
     },
     "SetOperationChild": {
       "type": "object",
@@ -145,30 +147,36 @@
         "relation": {
           "type": "string"
         }
-      }
+      },
+      "description": "Computes the set of subjects that have the included relation within the\nsame namespace.\n\nThis is useful to follow relations between an object and subject within\nthe same namespace. If you want anyone with an 'editor' relation to also\nhave 'viewer' this would be a good fit."
     },
     "v1alpha1NamespaceConfig": {
       "type": "object",
       "properties": {
         "name": {
-          "type": "string"
+          "type": "string",
+          "description": "The name of the namespace."
         },
         "relations": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/v1alpha1Relation"
-          }
+          },
+          "description": "The relations that this namespace defines."
         }
-      }
+      },
+      "description": "A namespace config defines the relations that exist between objects and subjects in\nin a namespace."
     },
     "v1alpha1ReadConfigResponse": {
       "type": "object",
       "properties": {
         "namespace": {
-          "type": "string"
+          "type": "string",
+          "description": "The namespace of the config."
         },
         "config": {
-          "$ref": "#/definitions/v1alpha1NamespaceConfig"
+          "$ref": "#/definitions/v1alpha1NamespaceConfig",
+          "description": "The namespace config for the given namespace."
         }
       },
       "description": "The response for a NamespaceConfigService.ReadConfig rpc."
@@ -177,23 +185,29 @@
       "type": "object",
       "properties": {
         "name": {
-          "type": "string"
+          "type": "string",
+          "description": "The name of the relation (e.g. viewer, editor, or member)."
         },
         "rewrite": {
-          "$ref": "#/definitions/v1alpha1Rewrite"
+          "$ref": "#/definitions/v1alpha1Rewrite",
+          "description": "The rewrite rule for this relation, or nil if it references itself."
         }
-      }
+      },
+      "description": "A Relation defines a type of relationship between an object and subject.\n\nRelations can have rewrite rules that specify how the relation is\ncomputed relative to other relations defined within the same namespace\nor across other namespaces."
     },
     "v1alpha1Rewrite": {
       "type": "object",
       "properties": {
         "union": {
-          "$ref": "#/definitions/v1alpha1SetOperation"
+          "$ref": "#/definitions/v1alpha1SetOperation",
+          "description": "Joins the children of the rewrite via set union."
         },
         "intersection": {
-          "$ref": "#/definitions/v1alpha1SetOperation"
+          "$ref": "#/definitions/v1alpha1SetOperation",
+          "description": "Joins the children of the rewrite via set intersection."
         }
-      }
+      },
+      "description": "Rewrites define sub-expressions that combine operations such as union or intersection. A rewrite\nsub-expression can be recursive and thus allows arbitrary logical expressions to be constructed."
     },
     "v1alpha1SetOperation": {
       "type": "object",
@@ -210,18 +224,22 @@
       "type": "object",
       "properties": {
         "tupleset": {
-          "$ref": "#/definitions/TupleToSubjectsetTupleset"
+          "$ref": "#/definitions/TupleToSubjectsetTupleset",
+          "description": "A tupleset defining the relation tuples that relate to the set of subjects that\nthis TupleToSubjectset applies to."
         },
         "computedSubjectset": {
-          "$ref": "#/definitions/v1alpha1ComputedSubjectset"
+          "$ref": "#/definitions/v1alpha1ComputedSubjectset",
+          "description": "The computed set of subjects that are looked up based on the expanded tupleset."
         }
-      }
+      },
+      "description": "Computes a tupleset from the input object, fetches relation tuples matching the\ntupleset, and computes the set of subjects from every fetched relation tuple.\n\nThis is useful to lookup relations in other namespaces or to create complex hierarchies\nbetween objects in multiple namespaces."
     },
     "v1alpha1WriteConfigRequest": {
       "type": "object",
       "properties": {
         "config": {
-          "$ref": "#/definitions/v1alpha1NamespaceConfig"
+          "$ref": "#/definitions/v1alpha1NamespaceConfig",
+          "description": "The namespace config to upsert."
         }
       },
       "description": "The request for a NamespaceConfigService.WriteConfig rpc."
