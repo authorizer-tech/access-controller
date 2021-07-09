@@ -18,7 +18,7 @@
   "paths": {
     "/authorizer/access-controller/v1alpha1/write": {
       "post": {
-        "summary": "Writes one or more relation tuples in a single transaction.",
+        "summary": "Mutates one or more relation tuples within a single transaction.",
         "operationId": "WriteService_WriteRelationTuplesTxn",
         "responses": {
           "200": {
@@ -59,7 +59,7 @@
         "ACTION_DELETE"
       ],
       "default": "ACTION_UNSPECIFIED",
-      "description": " - ACTION_UNSPECIFIED: Unspecified.\nThe `WriteRelationTuplesTxn` rpc ignores this\nRelationTupleDelta if an action was unspecified.\n - ACTION_INSERT: Insertion of a new RelationTuple.\nIt is ignored if already existing.\n - ACTION_DELETE: Deletion of the RelationTuple.\nIt is ignored if it does not exist."
+      "description": "An enumeration defining the actions or mutations that can be done on a RelationTuple.\n\n - ACTION_UNSPECIFIED: An unspecified action.\n\nThe `WriteRelationTuplesTxn` rpc ignores RelationTupleDeltas with\nan unspecified action.\n - ACTION_INSERT: Upserts a new RelationTuple.\n\nIf the RelationTuple already exists no modification is done.\n - ACTION_DELETE: Deletes the RelationTuple.\n\nIf the RelationTuple does not exist it's a no-op."
     },
     "protobufAny": {
       "type": "object",
@@ -100,18 +100,18 @@
         },
         "object": {
           "type": "string",
-          "description": "The object related by this tuple.\nObjects live within the namespace of the tuple."
+          "description": "The object identifier related by this tuple.\n\nObjects live within the namespace of the tuple."
         },
         "relation": {
           "type": "string",
-          "description": "The relation between an Object and a Subject."
+          "description": "The relation between the Object and the Subject."
         },
         "subject": {
           "$ref": "#/definitions/v1alpha1Subject",
-          "description": "The subject related by this tuple.\nA Subject either represents a concrete subject id or\na SubjectSet that expands to more Subjects."
+          "description": "The subject related by this tuple."
         }
       },
-      "description": "RelationTuple relates an Object with a Subject.\n\nWhile a tuple reflects a relationship between Object\nand Subject, they do not completely define the effective ACLs."
+      "description": "RelationTuple relates an object with a subject.\n\nWhile a tuple reflects a relationship between object\nand subject, they do not completely define the effective ACLs."
     },
     "v1alpha1RelationTupleDelta": {
       "type": "object",
@@ -132,21 +132,21 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "A concrete id of the subject."
+          "description": "A concrete subject id string for the subject."
         },
         "set": {
           "$ref": "#/definitions/v1alpha1SubjectSet",
-          "description": "A subject set that expands to more Subjects\n(used for inheritance)."
+          "description": "A SubjectSet that expands to more Subjects."
         }
       },
-      "description": "Subject is either a concrete subject id or\na subject set expanding to more Subjects."
+      "description": "Subject is either a concrete subject id string or\na SubjectSet expanding to more Subjects."
     },
     "v1alpha1SubjectSet": {
       "type": "object",
       "properties": {
         "namespace": {
           "type": "string",
-          "description": "The namespace of the object and relation\nreferenced in this subject set."
+          "description": "The namespace of the object and relation referenced in this SubjectSet."
         },
         "object": {
           "type": "string",
@@ -154,10 +154,10 @@
         },
         "relation": {
           "type": "string",
-          "description": "The relation to the object by the subjects."
+          "description": "The relation between the object and the subject(s)."
         }
       },
-      "description": "SubjectSet refers to all subjects which have\nthe same `relation` to an `object`.\nIt is also used for inheritance."
+      "description": "A SubjectSet refers to all subjects which have the same\nrelation to an object."
     },
     "v1alpha1WriteRelationTuplesTxnRequest": {
       "type": "object",
@@ -167,7 +167,7 @@
           "items": {
             "$ref": "#/definitions/v1alpha1RelationTupleDelta"
           },
-          "description": "The write delta for the relation tuples operated in one single transaction.\nEither all actions commit or no changes take effect on error.\n\nThe tuple's etag is used for a consistent read-modify-write request flow.\nIf the etag is not present, the tuple is not validated against the state\nof the serverside tuple."
+          "description": "The write delta for the relation tuples operated in one single transaction.\nEither all actions commit or no changes take effect on error."
         }
       },
       "description": "The request of a WriteService.WriteRelationTuplesTxn rpc."

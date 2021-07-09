@@ -11,7 +11,6 @@ import (
 
 	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
 	ac "github.com/authorizer-tech/access-controller/internal"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 // SQLStore implements the RelationTupleStore interface for a sql storage adapter.
@@ -87,11 +86,7 @@ func (s *SQLStore) RowCount(ctx context.Context, query ac.RelationTupleQuery) (i
 
 // ListRelationTuples lists the relation tuples matching the request query and filters the response fields
 // by the provided field mask.
-func (s *SQLStore) ListRelationTuples(ctx context.Context, query *aclpb.ListRelationTuplesRequest_Query, mask *fieldmaskpb.FieldMask) ([]ac.InternalRelationTuple, error) {
-
-	// if len(mask.GetPaths()) > 0 {
-	// 	sqlbuilder.Select(mask.GetPaths())
-	// }
+func (s *SQLStore) ListRelationTuples(ctx context.Context, query *aclpb.ListRelationTuplesRequest_Query) ([]ac.InternalRelationTuple, error) {
 
 	sqlbuilder := goqu.Dialect("postgres").From(query.GetNamespace()).Prepared(true)
 

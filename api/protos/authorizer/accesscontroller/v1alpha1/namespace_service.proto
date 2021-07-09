@@ -10,13 +10,15 @@ option go_package = "github.com/authorizer-tech/access-controller/genprotos/auth
 // The service to administer namespace configurations.
 service NamespaceConfigService {
 
-  // WriteConfig upserts a namespace configuration. If the namespace config already exists,
-  // the existing one is overwritten.
+  // WriteConfig upserts a namespace configuration.
   //
-  // If the new namespace config removes an existing relation, there must not be any relation
-  // tuples that reference it. Otherwise a FAILED_PRECONDITION status is returned. To migrate
-  // away from a relation, please move all existing relation tuples referencing it over to the
-  // new relation and then delete the old relation once all tuples have been migrated.
+  // If the namespace config already exists, the existing one is overwritten. If the new
+  // namespace config removes an existing relation, there must not be any relation tuples
+  // that reference it. Otherwise a FAILED_PRECONDITION status is returned.
+  //
+  // To migrate away from a relation, please move all existing relation tuples referencing
+  // it over to the new relation and then delete the old relation once all tuples have been
+  // migrated.
   rpc WriteConfig(WriteConfigRequest) returns (WriteConfigResponse) {
     option (google.api.http) = {
       put: "/authorizer/access-controller/v1alpha1/namespace-configs",
@@ -34,44 +36,73 @@ service NamespaceConfigService {
 
 // The request for a NamespaceConfigService.WriteConfig rpc.
 message WriteConfigRequest {
+
+    // The namespace config to upsert.
     NamespaceConfig config = 1;
 }
 
 // The response for a NamespaceConfigService.WriteConfig rpc.
-message WriteConfigResponse {
-
-}
+message WriteConfigResponse {}
 
 // The request for a NamespaceConfigService.ReadConfig rpc.
 message ReadConfigRequest {
+
+    // The namespace whose config should be read.
     string namespace = 1;
 }
 
 // The response for a NamespaceConfigService.ReadConfig rpc.
 message ReadConfigResponse {
+
+    // The namespace of the config.
     string namespace = 1;
+
+    // The namespace config for the given namespace.
     NamespaceConfig config = 2;
 }
 
+// A namespace config defines the relations that exist between objects and subjects in
+// in a namespace.
 message NamespaceConfig {
+
+    // The name of the namespace.
     string name = 1;
+
+    // The relations that this namespace defines.
     repeated Relation relations = 2;
 }
 
+// A Relation defines a type of relationship between an object and subject.
+//
+// Relations can have rewrite rules that specify how the relation is
+// computed relative to other relations defined within the same namespace
+// or across other namespaces.
 message Relation {
+
+    // The name of the relation (e.g. viewer, editor, or member).
     string name = 1;
+
+    // The rewrite rule for this relation, or nil if it references itself.
     Rewrite rewrite = 2;
 }
 
+// Rewrites define sub-expressions that combine operations such as union or intersection. A rewrite
+// sub-expression can be recursive and thus allows arbitrary logical expressions to be constructed.
 message Rewrite {
     oneof rewrite_operation {
+
+        // Joins the children of the rewrite via set union.
         SetOperation union = 1;
+
+        // Joins the children of the rewrite via set intersection.
         SetOperation intersection = 2;
     }
 }
 
 message SetOperation {
     message Child {
+
+        // This references the defined relation directly.
         message This {}
 
         oneof child_type {
@@ -85,13 +116,29 @@ message SetOperation {
     repeated Child children = 1;
 }
 
+// Computes a tupleset from the input object, fetches relation tuples matching the
+// tupleset, and computes the set of subjects from every fetched relation tuple.
+//
+// This is useful to lookup relations in other namespaces or to create complex hierarchies
+// between objects in multiple namespaces.
 message TupleToSubjectset {
+
     message Tupleset { string relation = 1; }
 
+    // A tupleset defining the relation tuples that relate to the set of subjects that
+    // this TupleToSubjectset applies to.
     Tupleset tupleset = 1;
+
+    // The computed set of subjects that are looked up based on the expanded tupleset.
     ComputedSubjectset computed_subjectset = 2;
 }
 
+// Computes the set of subjects that have the included relation within the
+// same namespace.
+//
+// This is useful to follow relations between an object and subject within
+// the same namespace. If you want anyone with an 'editor' relation to also
+// have 'viewer' this would be a good fit.
 message ComputedSubjectset {
     string relation = 2;
 }

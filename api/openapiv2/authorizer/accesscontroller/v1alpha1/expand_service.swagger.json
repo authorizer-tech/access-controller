@@ -52,7 +52,7 @@
       "properties": {
         "tree": {
           "$ref": "#/definitions/v1alpha1SubjectTree",
-          "description": "The tree the requested subject set expands to.\nThe requested subject set is the subject of the root.\n\nThis field can be nil in some circumstances."
+          "description": "The tree the requested SubjectSet expands to. The requested\nSubjectSet is the subject of the root.\n\nThis field can be nil in some circumstances."
         }
       },
       "description": "The response for an ExpandService.Expand rpc."
@@ -66,28 +66,28 @@
         "NODE_TYPE_LEAF"
       ],
       "default": "NODE_TYPE_UNSPECIFIED",
-      "description": " - NODE_TYPE_UNION: This node expands to a union of all children.\n - NODE_TYPE_INTERSECTION: This node expands to an intersection of the children.\n - NODE_TYPE_LEAF: This node is a leaf and contains no children.\nIts subject is a `SubjectID` unless `max_depth` was reached."
+      "description": "An enumeration defining types of nodes within a SubjectTree.\n\n - NODE_TYPE_UNION: A node type which expands to a union of all children.\n - NODE_TYPE_INTERSECTION: A node type which expands to an intersection of the children.\n - NODE_TYPE_LEAF: A node type which is a leaf and contains no children.\n\nIts Subject is a subject id string unless the maximum call depth was reached."
     },
     "v1alpha1Subject": {
       "type": "object",
       "properties": {
         "id": {
           "type": "string",
-          "description": "A concrete id of the subject."
+          "description": "A concrete subject id string for the subject."
         },
         "set": {
           "$ref": "#/definitions/v1alpha1SubjectSet",
-          "description": "A subject set that expands to more Subjects\n(used for inheritance)."
+          "description": "A SubjectSet that expands to more Subjects."
         }
       },
-      "description": "Subject is either a concrete subject id or\na subject set expanding to more Subjects."
+      "description": "Subject is either a concrete subject id string or\na SubjectSet expanding to more Subjects."
     },
     "v1alpha1SubjectSet": {
       "type": "object",
       "properties": {
         "namespace": {
           "type": "string",
-          "description": "The namespace of the object and relation\nreferenced in this subject set."
+          "description": "The namespace of the object and relation referenced in this SubjectSet."
         },
         "object": {
           "type": "string",
@@ -95,10 +95,10 @@
         },
         "relation": {
           "type": "string",
-          "description": "The relation to the object by the subjects."
+          "description": "The relation between the object and the subject(s)."
         }
       },
-      "description": "SubjectSet refers to all subjects which have\nthe same `relation` to an `object`.\nIt is also used for inheritance."
+      "description": "A SubjectSet refers to all subjects which have the same\nrelation to an object."
     },
     "v1alpha1SubjectTree": {
       "type": "object",

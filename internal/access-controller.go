@@ -20,7 +20,6 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 var (
@@ -621,7 +620,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 					Namespace: namespace,
 					Object:    object,
 					Relations: []string{relation},
-				}, &fieldmaskpb.FieldMask{})
+				})
 				if err != nil {
 					return nil, internalErrorStatus
 				}
@@ -670,7 +669,7 @@ func (a *AccessController) expandWithRewrite(ctx context.Context, rewrite *aclpb
 					Namespace: namespace,
 					Object:    object,
 					Relations: []string{rr},
-				}, &fieldmaskpb.FieldMask{})
+				})
 				if err != nil {
 					return nil, internalErrorStatus
 				}
@@ -897,7 +896,7 @@ func (a *AccessController) ListRelationTuples(ctx context.Context, req *aclpb.Li
 		}.ToStatus().Err()
 	}
 
-	tuples, err := a.RelationTupleStore.ListRelationTuples(ctx, req.GetQuery(), req.GetExpandMask())
+	tuples, err := a.RelationTupleStore.ListRelationTuples(ctx, req.GetQuery())
 	if err != nil {
 		log.Errorf("ListRelationTuples failed with error: %v", err)
 
