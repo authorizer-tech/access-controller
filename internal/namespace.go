@@ -66,17 +66,17 @@ var ErrNamespaceDoesntExist error = errors.New("the provided namespace doesn't e
 // and no local namespaces have been defined.
 var ErrNoLocalNamespacesDefined error = errors.New("no local namespace configs have been defined at this time")
 
-var nsConfigSnapshotTimestampKey ctxKey
+type nsConfigSnapshotTimestampKey string
 
-// NewContextWithNamespaceConfigTimestamp returns a new Context that carries the namespace config timestamp.
-func NewContextWithNamespaceConfigTimestamp(ctx context.Context, timestamp time.Time) context.Context {
-	return context.WithValue(ctx, nsConfigSnapshotTimestampKey, timestamp)
+// NewContextWithNamespaceConfigTimestamp returns a new Context that carries the namespace config name and timestamp.
+func NewContextWithNamespaceConfigTimestamp(ctx context.Context, namespace string, timestamp time.Time) context.Context {
+	return context.WithValue(ctx, nsConfigSnapshotTimestampKey(namespace), timestamp)
 }
 
 // NamespaceConfigTimestampFromContext extracts the snapshot timestamp for a namespace
 // configuration from the provided context. If none is present, a boolean false is returned.
-func NamespaceConfigTimestampFromContext(ctx context.Context) (time.Time, bool) {
-	timestamp, ok := ctx.Value(nsConfigSnapshotTimestampKey).(time.Time)
+func NamespaceConfigTimestampFromContext(ctx context.Context, namespace string) (time.Time, bool) {
+	timestamp, ok := ctx.Value(nsConfigSnapshotTimestampKey(namespace)).(time.Time)
 	return timestamp, ok
 }
 

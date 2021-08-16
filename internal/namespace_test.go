@@ -33,7 +33,14 @@ func TestNamespaceConfigTimestampFromContext(t *testing.T) {
 			},
 		},
 		{
-			input: NewContextWithNamespaceConfigTimestamp(context.Background(), ts),
+			input: NewContextWithNamespaceConfigTimestamp(context.Background(), "namespace2", ts),
+			output: output{
+				timestamp: time.Time{},
+				ok:        false,
+			},
+		},
+		{
+			input: NewContextWithNamespaceConfigTimestamp(context.Background(), "namespace1", ts),
 			output: output{
 				timestamp: ts,
 				ok:        true,
@@ -42,7 +49,7 @@ func TestNamespaceConfigTimestampFromContext(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		timestamp, ok := NamespaceConfigTimestampFromContext(test.input)
+		timestamp, ok := NamespaceConfigTimestampFromContext(test.input, "namespace1")
 
 		if ok != test.output.ok {
 			t.Errorf("Expected ok to be '%v', but got '%v'", test.output.ok, ok)
