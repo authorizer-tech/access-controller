@@ -476,7 +476,7 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 	// The namespace config timestamp from the peer should always be present if
 	// the request is proxied from another access-controller. If the request is
 	// made externally, we select a namespace config timestamp and forward it on.
-	peerNamespaceCfgTs, ok := NamespaceConfigTimestampFromContext(ctx)
+	peerNamespaceCfgTs, ok := NamespaceConfigTimestampFromContext(ctx, namespace)
 	if !ok {
 		snapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
 		if err != nil {
@@ -492,7 +492,7 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 
 		snapshotTimestamp = snapshot.Timestamp
 
-		ctx = NewContextWithNamespaceConfigTimestamp(ctx, snapshotTimestamp)
+		ctx = NewContextWithNamespaceConfigTimestamp(ctx, namespace, snapshotTimestamp)
 	} else {
 		snapshotTimestamp = peerNamespaceCfgTs
 	}
@@ -732,7 +732,7 @@ func (a *AccessController) expand(ctx context.Context, namespace, object, relati
 		return nil, nil
 	}
 
-	ctx = NewContextWithNamespaceConfigTimestamp(ctx, configSnapshot.Timestamp)
+	ctx = NewContextWithNamespaceConfigTimestamp(ctx, namespace, configSnapshot.Timestamp)
 
 	return a.expandWithRewrite(ctx, rewrite, tree, namespace, object, relation, depth)
 }
