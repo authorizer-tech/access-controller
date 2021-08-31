@@ -1139,6 +1139,62 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 				err: status.Error(codes.InvalidArgument, "one or more mutations must be provided"),
 			},
 		},
+		{
+			name: "Test-11: Alias Relation is Implicitly Defined",
+			input: &aclpb.WriteRelationTuplesTxnRequest{
+				RelationTupleDeltas: []*aclpb.RelationTupleDelta{
+					{
+						Action: aclpb.RelationTupleDelta_ACTION_INSERT,
+						RelationTuple: &aclpb.RelationTuple{
+							Namespace: namespace1Config.Name,
+							Object:    "object1",
+							Relation:  "relation1",
+							Subject: &aclpb.Subject{
+								Ref: &aclpb.Subject_Set{
+									Set: &aclpb.SubjectSet{
+										Namespace: namespace1Config.Name,
+										Object:    "object2",
+										Relation:  "..."},
+								},
+							},
+						},
+					},
+				},
+			},
+			output: output{
+				response: &aclpb.WriteRelationTuplesTxnResponse{},
+			},
+			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
+				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
+					changelog := []*NamespaceChangelogEntry{
+						{
+							Namespace: namespace1Config.Name,
+							Operation: AddNamespace,
+							Config:    namespace1Config,
+							Timestamp: time.Now(),
+						},
+					}
+					iter := NewMockChangelogIterator(changelog)
+
+					return iter, nil
+				})
+
+				store.EXPECT().TransactRelationTuples(gomock.Any(),
+					[]*InternalRelationTuple{
+						{
+							Namespace: namespace1Config.Name,
+							Object:    "object1",
+							Relation:  "relation1",
+							Subject: &SubjectSet{
+								Namespace: namespace1Config.Name,
+								Object:    "object2",
+								Relation:  "...",
+							},
+						},
+					},
+					[]*InternalRelationTuple{}).Return(nil)
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -1178,11 +1234,11 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 			response, err := controller.WriteRelationTuplesTxn(context.Background(), test.input)
 
 			if !errors.Is(err, test.output.err) {
-				t.Errorf("Expected error '%v', but got '%v'", err, test.output.err)
+				t.Errorf("Expected error '%v', but got '%v'", test.output.err, err)
 			}
 
 			if !proto.Equal(response, test.output.response) {
-				t.Errorf("Expected response '%v', but got '%v'", response, test.output.response)
+				t.Errorf("Expected response '%v', but got '%v'", test.output.response, response)
 			}
 		})
 	}
