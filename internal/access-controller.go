@@ -845,12 +845,14 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 					return nil, internalErrorStatus
 				}
 
-				rewrite := rewriteFromNamespaceConfig(r, configSnapshot.Config)
-				if rewrite == nil {
-					return nil, NamespaceConfigError{
-						Message: fmt.Sprintf("SubjectSet '%s' references relation '%s' which is undefined in the namespace '%s' at snapshot config timestamp '%s'. If this relation was recently added to the config, please try again in a couple minutes", subject.String(), r, n, configSnapshot.Timestamp),
-						Type:    NamespaceRelationUndefined,
-					}.ToStatus().Err()
+				if r != "..." {
+					rewrite := rewriteFromNamespaceConfig(r, configSnapshot.Config)
+					if rewrite == nil {
+						return nil, NamespaceConfigError{
+							Message: fmt.Sprintf("SubjectSet '%s' references relation '%s' which is undefined in the namespace '%s' at snapshot config timestamp '%s'. If this relation was recently added to the config, please try again in a couple minutes", subject.String(), r, n, configSnapshot.Timestamp),
+							Type:    NamespaceRelationUndefined,
+						}.ToStatus().Err()
+					}
 				}
 			}
 
