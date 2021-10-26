@@ -276,3 +276,6 @@ func (s *SQLStore) TransactRelationTuples(ctx context.Context, tupleInserts []*a
 
 	return txn.Commit()
 }
+
+// Always verify that we implement the interface
+var _ ac.RelationTupleStore = &SQLStore{}

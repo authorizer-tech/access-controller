@@ -1,4 +1,4 @@
-package accesscontroller
+package hashring
 
 import (
 	"context"

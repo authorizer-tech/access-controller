@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
 	ac "github.com/authorizer-tech/access-controller/internal"
 	"github.com/authorizer-tech/access-controller/internal/datastores"
+	"github.com/authorizer-tech/access-controller/internal/healthchecker"
 	"github.com/authorizer-tech/access-controller/internal/namespace-manager/postgres"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -44,7 +46,6 @@ var advertise = flag.String("advertise", "", "The address that this node adverti
 var grpcPort = flag.Int("grpc-port", 50052, "The bind port for the grpc server")
 var httpPort = flag.Int("http-port", 8082, "The bind port for the grpc-gateway http server")
 var join = flag.String("join", "", "A comma-separated list of 'host:port' addresses for nodes in the cluster to join to")
-var configPath = flag.String("config", "./localconfig/config.yaml", "The path to the server config")
 var migrations = flag.String("migrations", "./db/migrations", "The absolute path to the database migrations directory")
 
 type config struct {
@@ -63,10 +64,17 @@ func main() {
 
 	flag.Parse()
 
-	viper.SetConfigFile(*configPath)
+	configPaths := []string{"/etc/authorizer/access-controller", "$HOME/.authorizer/access-controller", "."}
+	for _, path := range configPaths {
+		viper.AddConfigPath(path)
+	}
 	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			log.Fatalf("server config not found in paths [%s]", strings.Join(configPaths, ","))
+		}
+
 		log.Fatalf("Failed to load server config file: %v", err)
 	}
 
@@ -173,7 +181,7 @@ func main() {
 		log.Fatalf("Failed to initialize the access-controller: %v", err)
 	}
 
-	healthChecker := ac.NewHealthChecker(controller.HealthCheck)
+	healthChecker := healthchecker.NewHealthChecker(controller.HealthCheck)
 
 	addr := fmt.Sprintf(":%d", *grpcPort)
 	listener, err := net.Listen("tcp", addr)

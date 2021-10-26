@@ -12,7 +12,7 @@ import (
 	"database/sql"
 
 	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
-	ac "github.com/authorizer-tech/access-controller/internal"
+	namespacemgr "github.com/authorizer-tech/access-controller/internal/namespace-manager"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/cockroachdb"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -182,8 +182,8 @@ func TestNamespaceManager(t *testing.T) {
 	// Attempt to get a namespace config for a namespace that doesn't exist, verify
 	// it's nil
 	config, err = m.GetConfig(context.Background(), "missing-namespace")
-	if err != ac.ErrNamespaceDoesntExist {
-		t.Errorf("Expected error '%v', but got '%v'", ac.ErrNamespaceDoesntExist, err)
+	if err != namespacemgr.ErrNamespaceDoesntExist {
+		t.Errorf("Expected error '%v', but got '%v'", namespacemgr.ErrNamespaceDoesntExist, err)
 	}
 	if config != nil {
 		t.Errorf("Expected nil config, but got '%v", config)
@@ -236,7 +236,7 @@ func TestNamespaceManager(t *testing.T) {
 		t.Errorf("Expected error to be nil, but got '%v'", err)
 	}
 
-	changelog := []*ac.NamespaceChangelogEntry{}
+	changelog := []*namespacemgr.NamespaceChangelogEntry{}
 	for iter.Next() {
 
 		entry, err := iter.Value()
@@ -256,16 +256,16 @@ func TestNamespaceManager(t *testing.T) {
 	}
 
 	// changelog entries are sorted in timestamp acending order (least recent first)
-	expected := []*ac.NamespaceChangelogEntry{
+	expected := []*namespacemgr.NamespaceChangelogEntry{
 		{
 			Namespace: cfg1.Name,
-			Operation: ac.AddNamespace,
+			Operation: namespacemgr.AddNamespace,
 			Config:    changelog[0].Config, // todo: assert the correct value here too
 			Timestamp: changelog[0].Timestamp,
 		},
 		{
 			Namespace: cfg2.Name,
-			Operation: ac.UpdateNamespace,
+			Operation: namespacemgr.UpdateNamespace,
 			Config:    changelog[1].Config, // todo: assert the correct value here too
 			Timestamp: changelog[1].Timestamp,
 		},

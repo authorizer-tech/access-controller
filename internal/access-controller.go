@@ -14,6 +14,8 @@ import (
 	"github.com/pkg/errors"
 
 	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
+	"github.com/authorizer-tech/access-controller/internal/hashring"
+	namespacemgr "github.com/authorizer-tech/access-controller/internal/namespace-manager"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -36,11 +38,11 @@ type AccessController struct {
 
 	Memberlist *memberlist.Memberlist
 	RPCRouter  ClientRouter
-	Hashring   Hashring
+	Hashring   hashring.Hashring
 
 	RelationTupleStore
-	PeerNamespaceConfigStore
-	NamespaceManager
+	namespacemgr.PeerNamespaceConfigStore
+	namespacemgr.NamespaceManager
 	NodeConfigs
 
 	shutdown chan struct{}
@@ -56,7 +58,7 @@ func WithStore(store RelationTupleStore) AccessControllerOption {
 }
 
 // WithNamespaceManager sets the AccessController's NamespaceManager.
-func WithNamespaceManager(m NamespaceManager) AccessControllerOption {
+func WithNamespaceManager(m namespacemgr.NamespaceManager) AccessControllerOption {
 	return func(ac *AccessController) {
 		ac.NamespaceManager = m
 	}
@@ -80,7 +82,7 @@ func (a *AccessController) watchNamespaceConfigs(ctx context.Context) {
 	go func() {
 		for {
 
-			var iter ChangelogIterator
+			var iter namespacemgr.ChangelogIterator
 			var err error
 
 			err = backoff.Retry(func() error {
@@ -115,7 +117,7 @@ func (a *AccessController) watchNamespaceConfigs(ctx context.Context) {
 				timestamp := change.Timestamp
 
 				switch change.Operation {
-				case AddNamespace, UpdateNamespace:
+				case namespacemgr.AddNamespace, namespacemgr.UpdateNamespace:
 					err := a.PeerNamespaceConfigStore.SetNamespaceConfigSnapshot(a.ServerID, namespace, config, timestamp)
 					if err != nil {
 						log.Errorf("Failed to set the namespace config snapshot for this node: %v", err)
@@ -137,7 +139,7 @@ func (a *AccessController) watchNamespaceConfigs(ctx context.Context) {
 
 // chooseNamespaceConfigSnapshot selects the most recent namespace config snapshot that is
 // common to all peers/nodes within the cluster that this node is a part of.
-func (a *AccessController) chooseNamespaceConfigSnapshot(namespace string) (*NamespaceConfigSnapshot, error) {
+func (a *AccessController) chooseNamespaceConfigSnapshot(namespace string) (*namespacemgr.NamespaceConfigSnapshot, error) {
 
 	peerSnapshots, err := a.PeerNamespaceConfigStore.ListNamespaceConfigSnapshots(namespace)
 	if err != nil {
@@ -180,10 +182,10 @@ func (a *AccessController) chooseNamespaceConfigSnapshot(namespace string) (*Nam
 		}
 
 		if len(commonTimestamps) < 1 {
-			return nil, ErrNoLocalNamespacesDefined
+			return nil, namespacemgr.ErrNoLocalNamespacesDefined
 		}
 	} else {
-		return nil, ErrNoLocalNamespacesDefined
+		return nil, namespacemgr.ErrNoLocalNamespacesDefined
 	}
 
 	var selectedTS time.Time
@@ -195,7 +197,7 @@ func (a *AccessController) chooseNamespaceConfigSnapshot(namespace string) (*Nam
 
 	config := peerSnapshots[peerWithMin][selectedTS]
 
-	snapshot := &NamespaceConfigSnapshot{
+	snapshot := &namespacemgr.NamespaceConfigSnapshot{
 		Config:    config,
 		Timestamp: selectedTS,
 	}
@@ -206,14 +208,10 @@ func (a *AccessController) chooseNamespaceConfigSnapshot(namespace string) (*Nam
 // NewAccessController constructs a new AccessController with the options provided.
 func NewAccessController(opts ...AccessControllerOption) (*AccessController, error) {
 
-	peerConfigs := &inmemPeerNamespaceConfigStore{
-		configs: make(map[string]map[string]map[time.Time]*aclpb.NamespaceConfig),
-	}
-
 	ac := AccessController{
 		RPCRouter:                NewMapClientRouter(),
-		Hashring:                 NewConsistentHashring(nil),
-		PeerNamespaceConfigStore: peerConfigs,
+		Hashring:                 hashring.NewConsistentHashring(nil),
+		PeerNamespaceConfigStore: namespacemgr.NewInMemoryPeerNamespaceConfigStore(),
 		shutdown:                 make(chan struct{}),
 	}
 
@@ -234,8 +232,8 @@ func NewAccessController(opts ...AccessControllerOption) (*AccessController, err
 		}
 
 		switch entry.Operation {
-		case AddNamespace, UpdateNamespace:
-			err = peerConfigs.SetNamespaceConfigSnapshot(ac.ServerID, entry.Namespace, entry.Config, entry.Timestamp)
+		case namespacemgr.AddNamespace, namespacemgr.UpdateNamespace:
+			err = ac.SetNamespaceConfigSnapshot(ac.ServerID, entry.Namespace, entry.Config, entry.Timestamp)
 			if err != nil {
 				return nil, err
 			}
@@ -461,7 +459,7 @@ func (a *AccessController) checkRewrite(ctx context.Context, rule *aclpb.Rewrite
 
 func (a *AccessController) check(ctx context.Context, namespace, object, relation, subject string) (bool, error) {
 
-	if peerChecksum, ok := ChecksumFromContext(ctx); ok {
+	if peerChecksum, ok := hashring.ChecksumFromContext(ctx); ok {
 		// The hash ring checksum of the peer should always be present if the
 		// request is proxied from another access-controller. If the request
 		// is made externally it won't be present.
@@ -476,14 +474,14 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 	// The namespace config timestamp from the peer should always be present if
 	// the request is proxied from another access-controller. If the request is
 	// made externally, we select a namespace config timestamp and forward it on.
-	peerNamespaceCfgTs, ok := NamespaceConfigTimestampFromContext(ctx, namespace)
+	peerNamespaceCfgTs, ok := namespacemgr.NamespaceConfigTimestampFromContext(ctx, namespace)
 	if !ok {
 		snapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
 		if err != nil {
-			if err == ErrNoLocalNamespacesDefined {
-				return false, NamespaceConfigError{
+			if err == namespacemgr.ErrNoLocalNamespacesDefined {
+				return false, namespacemgr.NamespaceConfigError{
 					Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
-					Type:    NamespaceDoesntExist,
+					Type:    namespacemgr.NamespaceDoesntExist,
 				}.ToStatus().Err()
 			}
 
@@ -492,7 +490,7 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 
 		snapshotTimestamp = snapshot.Timestamp
 
-		ctx = NewContextWithNamespaceConfigTimestamp(ctx, namespace, snapshotTimestamp)
+		ctx = namespacemgr.NewContextWithNamespaceConfigTimestamp(ctx, namespace, snapshotTimestamp)
 	} else {
 		snapshotTimestamp = peerNamespaceCfgTs
 	}
@@ -503,9 +501,9 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 	}
 
 	if cfg == nil {
-		return false, NamespaceConfigError{
+		return false, namespacemgr.NamespaceConfigError{
 			Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
-			Type:    NamespaceDoesntExist,
+			Type:    namespacemgr.NamespaceDoesntExist,
 		}.ToStatus().Err()
 	}
 
@@ -531,7 +529,7 @@ func (a *AccessController) check(ctx context.Context, namespace, object, relatio
 			panic("unexpected rpc client type encountered")
 		}
 
-		ctx = NewContextWithChecksum(ctx, a.Hashring.Checksum())
+		ctx = hashring.NewContextWithChecksum(ctx, a.Hashring.Checksum())
 
 		subject := SubjectID{ID: subject}
 
@@ -709,10 +707,10 @@ func (a *AccessController) expand(ctx context.Context, namespace, object, relati
 
 	configSnapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
 	if err != nil {
-		if err == ErrNoLocalNamespacesDefined {
-			return nil, NamespaceConfigError{
+		if err == namespacemgr.ErrNoLocalNamespacesDefined {
+			return nil, namespacemgr.NamespaceConfigError{
 				Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
-				Type:    NamespaceDoesntExist,
+				Type:    namespacemgr.NamespaceDoesntExist,
 			}.ToStatus().Err()
 		}
 
@@ -732,7 +730,7 @@ func (a *AccessController) expand(ctx context.Context, namespace, object, relati
 		return nil, nil
 	}
 
-	ctx = NewContextWithNamespaceConfigTimestamp(ctx, namespace, configSnapshot.Timestamp)
+	ctx = namespacemgr.NewContextWithNamespaceConfigTimestamp(ctx, namespace, configSnapshot.Timestamp)
 
 	return a.expandWithRewrite(ctx, rewrite, tree, namespace, object, relation, depth)
 }
@@ -804,9 +802,9 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 
 		configSnapshot, err := a.chooseNamespaceConfigSnapshot(namespace)
 		if err != nil {
-			return nil, NamespaceConfigError{
+			return nil, namespacemgr.NamespaceConfigError{
 				Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
-				Type:    NamespaceDoesntExist,
+				Type:    namespacemgr.NamespaceDoesntExist,
 			}.ToStatus().Err()
 		}
 
@@ -822,9 +820,9 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 
 			rewrite := rewriteFromNamespaceConfig(relation, configSnapshot.Config)
 			if rewrite == nil {
-				return nil, NamespaceConfigError{
+				return nil, namespacemgr.NamespaceConfigError{
 					Message: fmt.Sprintf("'%s' relation is undefined in namespace '%s' at snapshot config timestamp '%s'. If this relation was recently added, please try again in a couple minutes", relation, namespace, configSnapshot.Timestamp),
-					Type:    NamespaceRelationUndefined,
+					Type:    namespacemgr.NamespaceRelationUndefined,
 				}.ToStatus().Err()
 			}
 
@@ -835,10 +833,10 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 
 				configSnapshot, err := a.chooseNamespaceConfigSnapshot(n)
 				if err != nil {
-					if err == ErrNoLocalNamespacesDefined {
-						return nil, NamespaceConfigError{
+					if err == namespacemgr.ErrNoLocalNamespacesDefined {
+						return nil, namespacemgr.NamespaceConfigError{
 							Message: fmt.Sprintf("SubjectSet '%s' references the '%s' namespace which is undefined. If this namespace was recently added, please try again in a couple minutes", subject.String(), n),
-							Type:    NamespaceDoesntExist,
+							Type:    namespacemgr.NamespaceDoesntExist,
 						}.ToStatus().Err()
 					}
 
@@ -848,9 +846,9 @@ func (a *AccessController) WriteRelationTuplesTxn(ctx context.Context, req *aclp
 				if r != "..." {
 					rewrite := rewriteFromNamespaceConfig(r, configSnapshot.Config)
 					if rewrite == nil {
-						return nil, NamespaceConfigError{
+						return nil, namespacemgr.NamespaceConfigError{
 							Message: fmt.Sprintf("SubjectSet '%s' references relation '%s' which is undefined in the namespace '%s' at snapshot config timestamp '%s'. If this relation was recently added to the config, please try again in a couple minutes", subject.String(), r, n, configSnapshot.Timestamp),
-							Type:    NamespaceRelationUndefined,
+							Type:    namespacemgr.NamespaceRelationUndefined,
 						}.ToStatus().Err()
 					}
 				}
@@ -892,9 +890,9 @@ func (a *AccessController) ListRelationTuples(ctx context.Context, req *aclpb.Li
 
 	_, err := a.chooseNamespaceConfigSnapshot(namespace)
 	if err != nil {
-		return nil, NamespaceConfigError{
+		return nil, namespacemgr.NamespaceConfigError{
 			Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace),
-			Type:    NamespaceDoesntExist,
+			Type:    namespacemgr.NamespaceDoesntExist,
 		}.ToStatus().Err()
 	}
 
@@ -990,7 +988,7 @@ func (a *AccessController) WriteConfig(ctx context.Context, req *aclpb.WriteConf
 	err := a.NamespaceManager.WrapTransaction(ctx, func(txnCtx context.Context) error {
 		currentConfig, err := a.NamespaceManager.GetConfig(txnCtx, namespace)
 		if err != nil {
-			if err == ErrNamespaceDoesntExist {
+			if err == namespacemgr.ErrNamespaceDoesntExist {
 				return a.NamespaceManager.UpsertConfig(txnCtx, config)
 			}
 
@@ -1022,9 +1020,9 @@ func (a *AccessController) WriteConfig(ctx context.Context, req *aclpb.WriteConf
 					relations = append(relations, relation)
 				}
 
-				return NamespaceConfigError{
+				return namespacemgr.NamespaceConfigError{
 					Message: fmt.Sprintf("Relation(s) [%v] cannot be removed while one or more relation tuples reference them. Please migrate all relation tuples before removing a relation.", strings.Join(relations, ",")),
-					Type:    NamespaceUpdateFailedPrecondition,
+					Type:    namespacemgr.NamespaceUpdateFailedPrecondition,
 				}
 			}
 		}
@@ -1032,7 +1030,7 @@ func (a *AccessController) WriteConfig(ctx context.Context, req *aclpb.WriteConf
 		return a.NamespaceManager.UpsertConfig(txnCtx, config)
 	})
 	if err != nil {
-		err, ok := err.(NamespaceConfigError)
+		err, ok := err.(namespacemgr.NamespaceConfigError)
 		if ok {
 			return nil, err.ToStatus().Err()
 		}
@@ -1054,7 +1052,7 @@ func (a *AccessController) ReadConfig(ctx context.Context, req *aclpb.ReadConfig
 
 	config, err := a.NamespaceManager.GetConfig(ctx, namespace)
 	if err != nil {
-		if errors.Is(err, ErrNamespaceDoesntExist) {
+		if errors.Is(err, namespacemgr.ErrNamespaceDoesntExist) {
 			return nil, status.Errorf(codes.NotFound, "The namespace '%s' does not exist. If it was recently added, please try again in a couple of minutes", namespace)
 		}
 		return nil, internalErrorStatus

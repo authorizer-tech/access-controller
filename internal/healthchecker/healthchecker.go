@@ -1,4 +1,4 @@
-package accesscontroller
+package healthchecker
 
 import (
 	"context"
@@ -38,3 +38,6 @@ func (s *HealthChecker) Check(ctx context.Context, req *grpc_health_v1.HealthChe
 func (s *HealthChecker) Watch(req *grpc_health_v1.HealthCheckRequest, srv grpc_health_v1.Health_WatchServer) error {
 	return status.Error(codes.Unimplemented, "unimplemented")
 }
+
+// Always verify that we implement the interface
+var _ grpc_health_v1.HealthServer = &HealthChecker{}

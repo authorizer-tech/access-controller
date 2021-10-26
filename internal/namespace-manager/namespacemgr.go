@@ -1,6 +1,6 @@
-package accesscontroller
+package namespacemgr
 
-//go:generate mockgen -self_package github.com/authorizer-tech/access-controller/internal -destination=./mock_namespace_manager_test.go -package accesscontroller . NamespaceManager,PeerNamespaceConfigStore
+//go:generate mockgen -self_package github.com/authorizer-tech/access-controller/internal -destination=../mock_namespace_manager_test.go -package accesscontroller . NamespaceManager,PeerNamespaceConfigStore
 
 import (
 	"context"
@@ -183,6 +183,12 @@ type inmemPeerNamespaceConfigStore struct {
 	configs map[string]map[string]map[time.Time]*aclpb.NamespaceConfig
 }
 
+func NewInMemoryPeerNamespaceConfigStore() PeerNamespaceConfigStore {
+	return &inmemPeerNamespaceConfigStore{
+		configs: make(map[string]map[string]map[time.Time]*aclpb.NamespaceConfig),
+	}
+}
+
 func (p *inmemPeerNamespaceConfigStore) SetNamespaceConfigSnapshot(peerID string, namespace string, config *aclpb.NamespaceConfig, ts time.Time) error {
 	p.rwmu.Lock()
 	defer p.rwmu.Unlock()
@@ -269,3 +275,6 @@ func (p *inmemPeerNamespaceConfigStore) DeleteNamespaceConfigSnapshots(peerID st
 
 	return nil
 }
+
+// Always verify that we implement the interface
+var _ PeerNamespaceConfigStore = &inmemPeerNamespaceConfigStore{}

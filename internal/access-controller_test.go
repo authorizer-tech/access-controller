@@ -10,6 +10,8 @@ import (
 	"time"
 
 	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
+	"github.com/authorizer-tech/access-controller/internal/hashring"
+	namespacemgr "github.com/authorizer-tech/access-controller/internal/namespace-manager"
 	"github.com/golang/mock/gomock"
 	"github.com/hashicorp/memberlist"
 	"google.golang.org/grpc/codes"
@@ -110,9 +112,9 @@ func TestAccessController_Expand(t *testing.T) {
 				},
 			},
 			output: output{
-				err: NamespaceConfigError{
+				err: namespacemgr.NamespaceConfigError{
 					Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", "undefined"),
-					Type:    NamespaceDoesntExist,
+					Type:    namespacemgr.NamespaceDoesntExist,
 				}.ToStatus().Err(),
 			},
 		},
@@ -382,17 +384,17 @@ func TestAccessController_Expand(t *testing.T) {
 				test.mockController(mockStore)
 			}
 
-			mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-				changelog := []*NamespaceChangelogEntry{
+			mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+				changelog := []*namespacemgr.NamespaceChangelogEntry{
 					{
 						Namespace: filesConfig.Name,
-						Operation: AddNamespace,
+						Operation: namespacemgr.AddNamespace,
 						Config:    filesConfig,
 						Timestamp: timestamp,
 					},
 					{
 						Namespace: dirsConfig.Name,
-						Operation: AddNamespace,
+						Operation: namespacemgr.AddNamespace,
 						Config:    dirsConfig,
 						Timestamp: timestamp,
 					},
@@ -682,7 +684,7 @@ func TestAccessController_Check(t *testing.T) {
 		{
 			name: "Test-8: Checksums don't match",
 			input: input{
-				ctx: NewContextWithChecksum(context.Background(), 1),
+				ctx: hashring.NewContextWithChecksum(context.Background(), 1),
 				req: &aclpb.CheckRequest{
 					Namespace: "files",
 					Object:    "file1",
@@ -706,9 +708,9 @@ func TestAccessController_Check(t *testing.T) {
 				},
 			},
 			output: output{
-				err: NamespaceConfigError{
+				err: namespacemgr.NamespaceConfigError{
 					Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", "undefined"),
-					Type:    NamespaceDoesntExist,
+					Type:    namespacemgr.NamespaceDoesntExist,
 				}.ToStatus().Err(),
 			},
 		},
@@ -772,23 +774,23 @@ func TestAccessController_Check(t *testing.T) {
 				test.mockController(mockStore)
 			}
 
-			mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-				changelog := []*NamespaceChangelogEntry{
+			mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+				changelog := []*namespacemgr.NamespaceChangelogEntry{
 					{
 						Namespace: groupsConfig.Name,
-						Operation: AddNamespace,
+						Operation: namespacemgr.AddNamespace,
 						Config:    groupsConfig,
 						Timestamp: timestamp1,
 					},
 					{
 						Namespace: filesConfig.Name,
-						Operation: AddNamespace,
+						Operation: namespacemgr.AddNamespace,
 						Config:    filesConfig,
 						Timestamp: timestamp1,
 					},
 					{
 						Namespace: dirsConfig.Name,
-						Operation: AddNamespace,
+						Operation: namespacemgr.AddNamespace,
 						Config:    dirsConfig,
 						Timestamp: timestamp1,
 					},
@@ -888,11 +890,11 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 				response: &aclpb.WriteRelationTuplesTxnResponse{},
 			},
 			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-					changelog := []*NamespaceChangelogEntry{
+				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+					changelog := []*namespacemgr.NamespaceChangelogEntry{
 						{
 							Namespace: namespace1Config.Name,
-							Operation: AddNamespace,
+							Operation: namespacemgr.AddNamespace,
 							Config:    namespace1Config,
 							Timestamp: time.Now(),
 						},
@@ -939,9 +941,9 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 				},
 			},
 			output: output{
-				err: NamespaceConfigError{
+				err: namespacemgr.NamespaceConfigError{
 					Message: fmt.Sprintf("'%s' namespace is undefined. If you recently added it, it may take a couple minutes to propagate", namespace1Config.Name),
-					Type:    NamespaceDoesntExist,
+					Type:    namespacemgr.NamespaceDoesntExist,
 				}.ToStatus().Err(),
 			},
 		},
@@ -963,17 +965,17 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 				},
 			},
 			output: output{
-				err: NamespaceConfigError{
+				err: namespacemgr.NamespaceConfigError{
 					Message: fmt.Sprintf("'%s' relation is undefined in namespace '%s' at snapshot config timestamp '%s'. If this relation was recently added, please try again in a couple minutes", "relation2", namespace1Config.Name, timestamp1.Round(0).UTC()),
-					Type:    NamespaceRelationUndefined,
+					Type:    namespacemgr.NamespaceRelationUndefined,
 				}.ToStatus().Err(),
 			},
 			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-					changelog := []*NamespaceChangelogEntry{
+				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+					changelog := []*namespacemgr.NamespaceChangelogEntry{
 						{
 							Namespace: namespace1Config.Name,
-							Operation: AddNamespace,
+							Operation: namespacemgr.AddNamespace,
 							Config:    namespace1Config,
 							Timestamp: timestamp1,
 						},
@@ -1001,17 +1003,17 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 				},
 			},
 			output: output{
-				err: NamespaceConfigError{
+				err: namespacemgr.NamespaceConfigError{
 					Message: fmt.Sprintf("SubjectSet '%s' references the '%s' namespace which is undefined. If this namespace was recently added, please try again in a couple minutes", subjectSet, subjectSet.Namespace),
-					Type:    NamespaceDoesntExist,
+					Type:    namespacemgr.NamespaceDoesntExist,
 				}.ToStatus().Err(),
 			},
 			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-					changelog := []*NamespaceChangelogEntry{
+				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+					changelog := []*namespacemgr.NamespaceChangelogEntry{
 						{
 							Namespace: namespace1Config.Name,
-							Operation: AddNamespace,
+							Operation: namespacemgr.AddNamespace,
 							Config:    namespace1Config,
 							Timestamp: timestamp1,
 						},
@@ -1039,23 +1041,23 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 				},
 			},
 			output: output{
-				err: NamespaceConfigError{
+				err: namespacemgr.NamespaceConfigError{
 					Message: fmt.Sprintf("SubjectSet '%s' references relation '%s' which is undefined in the namespace '%s' at snapshot config timestamp '%s'. If this relation was recently added to the config, please try again in a couple minutes", subjectSet, "relation2", subjectSet.Namespace, timestamp1.Round(0).UTC()),
-					Type:    NamespaceRelationUndefined,
+					Type:    namespacemgr.NamespaceRelationUndefined,
 				}.ToStatus().Err(),
 			},
 			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-					changelog := []*NamespaceChangelogEntry{
+				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+					changelog := []*namespacemgr.NamespaceChangelogEntry{
 						{
 							Namespace: namespace1Config.Name,
-							Operation: AddNamespace,
+							Operation: namespacemgr.AddNamespace,
 							Config:    namespace1Config,
 							Timestamp: timestamp1,
 						},
 						{
 							Namespace: namespace2Config.Name,
-							Operation: AddNamespace,
+							Operation: namespacemgr.AddNamespace,
 							Config:    namespace2Config,
 							Timestamp: timestamp1,
 						},
@@ -1165,11 +1167,11 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 				response: &aclpb.WriteRelationTuplesTxnResponse{},
 			},
 			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-					changelog := []*NamespaceChangelogEntry{
+				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+					changelog := []*namespacemgr.NamespaceChangelogEntry{
 						{
 							Namespace: namespace1Config.Name,
-							Operation: AddNamespace,
+							Operation: namespacemgr.AddNamespace,
 							Config:    namespace1Config,
 							Timestamp: time.Now(),
 						},
@@ -1209,8 +1211,8 @@ func TestAccessController_WriteRelationTuplesTxn(t *testing.T) {
 			if test.mockController != nil {
 				test.mockController(mockStore, mockNamespaceManager)
 			} else {
-				mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-					changelog := []*NamespaceChangelogEntry{}
+				mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+					changelog := []*namespacemgr.NamespaceChangelogEntry{}
 					iter := NewMockChangelogIterator(changelog)
 					return iter, nil
 				})
@@ -1275,8 +1277,8 @@ func TestAccessController_ListRelationTuples(t *testing.T) {
 				err: status.Error(codes.InvalidArgument, "'undefined' namespace is undefined. If you recently added it, it may take a couple minutes to propagate"),
 			},
 			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-					changelog := []*NamespaceChangelogEntry{}
+				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+					changelog := []*namespacemgr.NamespaceChangelogEntry{}
 					iter := NewMockChangelogIterator(changelog)
 					return iter, nil
 				})
@@ -1291,11 +1293,11 @@ func TestAccessController_ListRelationTuples(t *testing.T) {
 				err: internalErrorStatus,
 			},
 			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-					changelog := []*NamespaceChangelogEntry{
+				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+					changelog := []*namespacemgr.NamespaceChangelogEntry{
 						{
 							Namespace: namespace1Config.Name,
-							Operation: AddNamespace,
+							Operation: namespacemgr.AddNamespace,
 							Config:    namespace1Config,
 							Timestamp: time.Now(),
 						},
@@ -1331,11 +1333,11 @@ func TestAccessController_ListRelationTuples(t *testing.T) {
 				},
 			},
 			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-					changelog := []*NamespaceChangelogEntry{
+				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+					changelog := []*namespacemgr.NamespaceChangelogEntry{
 						{
 							Namespace: namespace1Config.Name,
-							Operation: AddNamespace,
+							Operation: namespacemgr.AddNamespace,
 							Config:    namespace1Config,
 							Timestamp: time.Now(),
 						},
@@ -1370,8 +1372,8 @@ func TestAccessController_ListRelationTuples(t *testing.T) {
 				err: status.Error(codes.InvalidArgument, "'query' is a required field and cannot be nil"),
 			},
 			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-					changelog := []*NamespaceChangelogEntry{}
+				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+					changelog := []*namespacemgr.NamespaceChangelogEntry{}
 					iter := NewMockChangelogIterator(changelog)
 					return iter, nil
 				})
@@ -1386,8 +1388,8 @@ func TestAccessController_ListRelationTuples(t *testing.T) {
 				err: status.Error(codes.InvalidArgument, "'query.namespace' is a required field and cannot be empty"),
 			},
 			mockController: func(store *MockRelationTupleStore, nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-					changelog := []*NamespaceChangelogEntry{}
+				nsmanager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+					changelog := []*namespacemgr.NamespaceChangelogEntry{}
 					iter := NewMockChangelogIterator(changelog)
 					return iter, nil
 				})
@@ -1693,8 +1695,8 @@ func TestAccessController_WriteConfig(t *testing.T) {
 
 			mockNamespaceManager := NewMockNamespaceManager(ctrl)
 
-			mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-				changelog := []*NamespaceChangelogEntry{}
+			mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+				changelog := []*namespacemgr.NamespaceChangelogEntry{}
 				iter := NewMockChangelogIterator(changelog)
 				return iter, nil
 			})
@@ -1793,7 +1795,7 @@ func TestAccessController_ReadConfig(t *testing.T) {
 				err: status.Errorf(codes.NotFound, "The namespace '%s' does not exist. If it was recently added, please try again in a couple of minutes", validRequest.Namespace),
 			},
 			mockController: func(nsmanager *MockNamespaceManager) {
-				nsmanager.EXPECT().GetConfig(gomock.Any(), validRequest.Namespace).Return(nil, ErrNamespaceDoesntExist)
+				nsmanager.EXPECT().GetConfig(gomock.Any(), validRequest.Namespace).Return(nil, namespacemgr.ErrNamespaceDoesntExist)
 			},
 		},
 	}
@@ -1806,8 +1808,8 @@ func TestAccessController_ReadConfig(t *testing.T) {
 
 			mockNamespaceManager := NewMockNamespaceManager(ctrl)
 
-			mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-				changelog := []*NamespaceChangelogEntry{}
+			mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+				changelog := []*namespacemgr.NamespaceChangelogEntry{}
 				iter := NewMockChangelogIterator(changelog)
 				return iter, nil
 			})
@@ -1875,11 +1877,11 @@ func TestAccessController_LocalState(t *testing.T) {
 
 	mockNamespaceManager := NewMockNamespaceManager(ctrl)
 
-	mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-		changelog := []*NamespaceChangelogEntry{
+	mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+		changelog := []*namespacemgr.NamespaceChangelogEntry{
 			{
 				Namespace: config1.Name,
-				Operation: AddNamespace,
+				Operation: namespacemgr.AddNamespace,
 				Config:    config1,
 				Timestamp: timestamp1,
 			},
@@ -2201,17 +2203,17 @@ func TestAccessController_watchNamespaceConfigs(t *testing.T) {
 		shutdown:                 make(chan struct{}),
 	}
 
-	mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), uint(3)).DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
-		changelog := []*NamespaceChangelogEntry{
+	mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), uint(3)).DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
+		changelog := []*namespacemgr.NamespaceChangelogEntry{
 			{
 				Namespace: dirsConfig.Name,
-				Operation: AddNamespace,
+				Operation: namespacemgr.AddNamespace,
 				Config:    dirsConfig,
 				Timestamp: timestamp,
 			},
 			{
 				Namespace: filesConfig.Name,
-				Operation: UpdateNamespace,
+				Operation: namespacemgr.UpdateNamespace,
 				Config:    filesConfig,
 				Timestamp: timestamp,
 			},
@@ -2219,7 +2221,7 @@ func TestAccessController_watchNamespaceConfigs(t *testing.T) {
 		iter := NewMockChangelogIterator(changelog)
 		return iter, nil
 	}).After(
-		mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), uint(3)).DoAndReturn(func(ctx context.Context, n uint) (ChangelogIterator, error) {
+		mockNamespaceManager.EXPECT().TopChanges(gomock.Any(), uint(3)).DoAndReturn(func(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
 			return nil, fmt.Errorf("some database error")
 		}),
 	)
@@ -2339,4 +2341,33 @@ func TestAccessController_rewriteFromNamespaceConfig(t *testing.T) {
 			t.Errorf("Expected '%v', but got '%v'", test.output, rewrite)
 		}
 	}
+}
+
+type mockChangelogIterator struct {
+	index int
+	buf   []*namespacemgr.NamespaceChangelogEntry
+}
+
+func NewMockChangelogIterator(changelog []*namespacemgr.NamespaceChangelogEntry) namespacemgr.ChangelogIterator {
+
+	m := mockChangelogIterator{
+		index: 0,
+		buf:   changelog,
+	}
+
+	return &m
+}
+
+func (m *mockChangelogIterator) Next() bool {
+	return m.index < len(m.buf)
+}
+
+func (m *mockChangelogIterator) Value() (*namespacemgr.NamespaceChangelogEntry, error) {
+	entry := m.buf[m.index]
+	m.index += 1
+	return entry, nil
+}
+
+func (m *mockChangelogIterator) Close(ctx context.Context) error {
+	return nil
 }
