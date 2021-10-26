@@ -1,5 +1,6 @@
 .vscode/
 dist/
 genprotos/
+tmp/
 coverage.out
 internal/mock_*.go
