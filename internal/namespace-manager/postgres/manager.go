@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	aclpb "github.com/authorizer-tech/access-controller/genprotos/authorizer/accesscontroller/v1alpha1"
-	ac "github.com/authorizer-tech/access-controller/internal"
+	namespacemgr "github.com/authorizer-tech/access-controller/internal/namespace-manager"
 )
 
 type txnKey struct{}
@@ -21,7 +21,7 @@ type sqlNamespaceManager struct {
 
 // NewNamespaceManager instantiates a namespace manager that is backed by postgres
 // for persistence.
-func NewNamespaceManager(db *sql.DB) (ac.NamespaceManager, error) {
+func NewNamespaceManager(db *sql.DB) (namespacemgr.NamespaceManager, error) {
 
 	m := sqlNamespaceManager{
 		db,
@@ -48,11 +48,11 @@ func (m *sqlNamespaceManager) UpsertConfig(ctx context.Context, cfg *aclpb.Names
 			return err
 		}
 
-		var operation ac.NamespaceOperation
+		var operation namespacemgr.NamespaceOperation
 		if count > 0 {
-			operation = ac.UpdateNamespace
+			operation = namespacemgr.UpdateNamespace
 		} else {
-			operation = ac.AddNamespace
+			operation = namespacemgr.AddNamespace
 
 			stmt := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 				object text,
@@ -122,7 +122,7 @@ func (m *sqlNamespaceManager) GetConfig(ctx context.Context, namespace string) (
 
 		if err := row.Scan(&jsonConfig); err != nil {
 			if err == sql.ErrNoRows {
-				return ac.ErrNamespaceDoesntExist
+				return namespacemgr.ErrNamespaceDoesntExist
 			}
 
 			return err
@@ -184,7 +184,7 @@ func (m *sqlNamespaceManager) GetRewrite(ctx context.Context, namespace, relatio
 // TopChanges fetches the top n most recent namespace config changes for each namespace. If any error
 // occurs with the underlying txn an error is returned. Otherwise an iterator that iterates over the
 // changes is returned.
-func (m *sqlNamespaceManager) TopChanges(ctx context.Context, n uint) (ac.ChangelogIterator, error) {
+func (m *sqlNamespaceManager) TopChanges(ctx context.Context, n uint) (namespacemgr.ChangelogIterator, error) {
 
 	sql := `
 	SELECT "namespace", "operation", "config", "timestamp" FROM "namespace-changelog" AS "cfg1" 
@@ -326,7 +326,7 @@ func (i *iterator) Next() bool {
 
 // Value reads the current ChangelogEntry value the iterator is pointing at. Any read
 // errors are returned immediately.
-func (i *iterator) Value() (*ac.NamespaceChangelogEntry, error) {
+func (i *iterator) Value() (*namespacemgr.NamespaceChangelogEntry, error) {
 
 	var namespace, operation, configJSON string
 	var timestamp time.Time
@@ -334,12 +334,12 @@ func (i *iterator) Value() (*ac.NamespaceChangelogEntry, error) {
 		return nil, err
 	}
 
-	var op ac.NamespaceOperation
+	var op namespacemgr.NamespaceOperation
 	switch operation {
 	case "ADD":
-		op = ac.AddNamespace
+		op = namespacemgr.AddNamespace
 	case "UPDATE":
-		op = ac.UpdateNamespace
+		op = namespacemgr.UpdateNamespace
 	default:
 		panic("An unexpected namespace operation was encountered. Underlying system invariants were not met!")
 	}
@@ -349,7 +349,7 @@ func (i *iterator) Value() (*ac.NamespaceChangelogEntry, error) {
 		return nil, err
 	}
 
-	entry := &ac.NamespaceChangelogEntry{
+	entry := &namespacemgr.NamespaceChangelogEntry{
 		Namespace: namespace,
 		Operation: op,
 		Config:    &cfg,
@@ -364,3 +364,6 @@ func (i *iterator) Close(ctx context.Context) error {
 	i.rows.Close()
 	return nil
 }
+
+// Always verify that we implement the interface
+var _ namespacemgr.NamespaceManager = &sqlNamespaceManager{}

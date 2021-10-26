@@ -5,9 +5,9 @@ services:
     ports:
       - "50052:50052"
       - "8082:8082"
-    command: access-controller -config /etc/config/config.yaml
+    command: access-controller
     volumes:
-      - "${PWD}/docker:/etc/config"
+      - "${PWD}/docker:/etc/authorizer/access-controller"
     depends_on:
       - cockroachdb
 
@@ -16,9 +16,9 @@ services:
     ports:
       - "50053:50053"
       - "8083:8083"
-    command: access-controller -config /etc/config/config.yaml -grpc-port 50053 -http-port 8083 -node-port 7947 -join access-controller0:7946
+    command: access-controller -grpc-port 50053 -http-port 8083 -node-port 7947 -join access-controller0:7946
     volumes:
-      - "${PWD}/docker:/etc/config"
+      - "${PWD}/docker:/etc/authorizer/access-controller"
     depends_on:
       - access-controller0
 
@@ -27,9 +27,9 @@ services:
     ports:
       - "50054:50054"
       - "8084:8084"
-    command: access-controller -config /etc/config/config.yaml -grpc-port 50054 -http-port 8084 -node-port 7948 -join access-controller0:7946,access-controller1:7947
+    command: access-controller -grpc-port 50054 -http-port 8084 -node-port 7948 -join access-controller0:7946,access-controller1:7947
     volumes:
-      - "${PWD}/docker:/etc/config"
+      - "${PWD}/docker:/etc/authorizer/access-controller"
     depends_on:
       - access-controller1
 

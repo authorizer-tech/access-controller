@@ -1,4 +1,4 @@
-package accesscontroller
+package namespacemgr
 
 import (
 	"context"
@@ -436,33 +436,4 @@ func TestNamespaceConfigError_ToStatus(t *testing.T) {
 			}
 		})
 	}
-}
-
-type mockChangelogIterator struct {
-	index int
-	buf   []*NamespaceChangelogEntry
-}
-
-func NewMockChangelogIterator(changelog []*NamespaceChangelogEntry) ChangelogIterator {
-
-	m := mockChangelogIterator{
-		index: 0,
-		buf:   changelog,
-	}
-
-	return &m
-}
-
-func (m *mockChangelogIterator) Next() bool {
-	return m.index < len(m.buf)
-}
-
-func (m *mockChangelogIterator) Value() (*NamespaceChangelogEntry, error) {
-	entry := m.buf[m.index]
-	m.index += 1
-	return entry, nil
-}
-
-func (m *mockChangelogIterator) Close(ctx context.Context) error {
-	return nil
 }

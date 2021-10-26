@@ -70,3 +70,6 @@ func (r *mapClientRouter) RemoveClient(nodeID string) {
 	r.rw.Lock()
 	delete(r.cache, nodeID)
 }
+
+// Always verify that we implement the interface
+var _ ClientRouter = &mapClientRouter{}

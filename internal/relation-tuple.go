@@ -227,3 +227,7 @@ type RelationTupleQuery struct {
 	Relations []string
 	Subject   Subject
 }
+
+// Always verify that we implement the Subject interface
+var _ Subject = &SubjectID{}
+var _ Subject = &SubjectSet{}

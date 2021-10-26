@@ -1,4 +1,4 @@
-package accesscontroller
+package healthchecker
 
 import (
 	"context"

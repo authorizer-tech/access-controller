@@ -1,6 +1,6 @@
-package accesscontroller
+package hashring
 
-//go:generate mockgen -self_package github.com/authorizer-tech/access-controller/internal -destination=./mock_hashring_test.go -package accesscontroller . Hashring
+//go:generate mockgen -self_package github.com/authorizer-tech/access-controller/internal -destination=../mock_hashring_test.go -package accesscontroller . Hashring
 
 import (
 	"context"
@@ -134,3 +134,6 @@ func (ch *ConsistentHashring) Checksum() uint32 {
 	bytes := []byte(strings.Join(members, ","))
 	return crc32.ChecksumIEEE(bytes)
 }
+
+// Always verify that we implement the interface
+var _ Hashring = &ConsistentHashring{}
